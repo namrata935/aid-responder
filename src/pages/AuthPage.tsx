@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserRole } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -15,8 +15,9 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const { login, signup, user, selectRole } = useAuth();
+  const { login, user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // If user is already logged in, redirect to role selection or dashboard
   React.useEffect(() => {
@@ -28,6 +29,14 @@ export default function AuthPage() {
       }
     }
   }, [user, navigate]);
+
+  // Redirect to role selection when Sign Up tab is clicked
+  React.useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'signup' && !user) {
+      navigate('/role-selection?signup=true');
+    }
+  }, [searchParams, user, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,41 +53,8 @@ export default function AuthPage() {
     }
   };
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-    
-    try {
-      await signup(email, password);
-      toast.success('Account created successfully!');
-      navigate('/role-selection');
-    } catch (err) {
-      setError('Failed to create account. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRoleSignup = async (e: React.MouseEvent, role: UserRole) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    try {
-      await signup(email, password);
-      // Immediately set role for the new user and go to the correct dashboard
-      selectRole(role);
-      toast.success(
-        role === 'volunteer'
-          ? 'Account created as Volunteer!'
-          : 'Account created as Shelter Coordinator!'
-      );
-      navigate(`/${role}`);
-    } catch (err) {
-      setError('Failed to create account. Please try again.');
-      setIsLoading(false);
-    }
+  const handleSignupClick = () => {
+    navigate('/role-selection?signup=true');
   };
 
   return (
@@ -161,7 +137,7 @@ export default function AuthPage() {
               <Tabs defaultValue="login" className="w-full">
                 <TabsList className="grid w-full grid-cols-2 mb-6">
                   <TabsTrigger value="login">Login</TabsTrigger>
-                  <TabsTrigger value="signup">Sign Up</TabsTrigger>
+                  <TabsTrigger value="signup" onClick={handleSignupClick}>Sign Up</TabsTrigger>
                 </TabsList>
                 
                 <TabsContent value="login">
@@ -213,86 +189,21 @@ export default function AuthPage() {
                 </TabsContent>
                 
                 <TabsContent value="signup">
-                  <form onSubmit={handleSignup} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-email">Email</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          id="signup-email"
-                          type="email"
-                          placeholder="Enter your email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          className="pl-10"
-                          required
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-password">Password</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          id="signup-password"
-                          type="password"
-                          placeholder="Create a password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          className="pl-10"
-                          minLength={6}
-                          required
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Password must be at least 6 characters
-                      </p>
-                    </div>
-
-                    {error && (
-                      <div className="flex items-center gap-2 text-destructive text-sm p-3 bg-destructive/10 rounded-lg">
-                        <AlertCircle className="w-4 h-4" />
-                        {error}
-                      </div>
-                    )}
-
-                    <div className="space-y-3">
-                      <Button
-                        type="submit"
-                        variant="hero"
-                        className="w-full"
-                        size="lg"
-                        disabled={isLoading}
-                      >
-                        {isLoading ? 'Creating Account...' : 'Create Account & Choose Role'}
-                        <ArrowRight className="w-4 h-4" />
-                      </Button>
-
-                      <div className="text-xs text-muted-foreground text-center mt-1">
-                        Or get started directly as:
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={isLoading}
-                          onClick={(e) => handleRoleSignup(e, 'volunteer')}
-                        >
-                          Signup as Volunteer
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={isLoading}
-                          onClick={(e) => handleRoleSignup(e, 'coordinator')}
-                        >
-                          Signup as Shelter Manager
-                        </Button>
-                      </div>
-                    </div>
-                  </form>
+                  <div className="space-y-4 text-center">
+                    <p className="text-muted-foreground">
+                      Click below to select your role and create your account
+                    </p>
+                    <Button
+                      type="button"
+                      variant="hero"
+                      className="w-full"
+                      size="lg"
+                      onClick={handleSignupClick}
+                    >
+                      Choose Role & Sign Up
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
                 </TabsContent>
               </Tabs>
             </CardContent>

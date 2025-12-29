@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { DataProvider } from "./contexts/DataContext";
 import LandingPage from "./pages/LandingPage";
@@ -19,6 +19,8 @@ const queryClient = new QueryClient();
 
 function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole: string }) {
   const { user, isLoading } = useAuth();
+  const [searchParams] = useSearchParams();
+  const isSignupMode = searchParams.get('signup') === 'true';
   
   if (isLoading) {
     return (
@@ -31,12 +33,19 @@ function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; 
     );
   }
   
+  // Allow access if in signup mode (no user required yet)
+  if (!user && isSignupMode) {
+    return <>{children}</>;
+  }
+  
+  // If no user and not in signup mode, redirect to auth
   if (!user) {
     return <Navigate to="/auth" replace />;
   }
   
-  if (user.role !== allowedRole) {
-    return <Navigate to={`/${user.role || 'role-selection'}`} replace />;
+  // If user has a different role, redirect them to their role's dashboard
+  if (user.role && user.role !== allowedRole) {
+    return <Navigate to={`/${user.role}`} replace />;
   }
   
   return <>{children}</>;

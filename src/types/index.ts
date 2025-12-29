@@ -37,6 +37,9 @@ export interface Shelter {
   contactNumber: string;
   managerName: string;
   managerContact: string;
+  managerAddress?: string;
+  managerState?: string;
+  managerPincode?: string;
   coordinatorId: string;
   createdAt: Date;
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
@@ -26,13 +26,18 @@ import { toast } from 'sonner';
 import { Shelter } from '@/types';
 
 export default function VictimDashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, signup, selectRole } = useAuth();
   const { registerVictim, getShelterById } = useData();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   
   const [isRegistered, setIsRegistered] = useState(false);
   const [assignedShelter, setAssignedShelter] = useState<{ shelter: Shelter; distance: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupError, setSignupError] = useState('');
+  const [isSignupSubmitting, setIsSignupSubmitting] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -43,11 +48,41 @@ export default function VictimDashboard() {
     longitude: '',
   });
 
+  const isSignupMode = searchParams.get('signup') === 'true';
+
   React.useEffect(() => {
-    if (!user || user.role !== 'victim') {
+    // If no user and not coming from signup flow, send back to auth
+    if (!user && !isSignupMode) {
       navigate('/auth');
+      return;
     }
-  }, [user, navigate]);
+
+    // If user already has a different role, send them to their dashboard
+    if (user && user.role && user.role !== 'victim') {
+      navigate(`/${user.role}`);
+    }
+  }, [user, navigate, isSignupMode]);
+
+  const handleVictimSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSignupError('');
+
+    if (!signupEmail || !signupPassword) {
+      setSignupError('Please enter email and password.');
+      return;
+    }
+
+    setIsSignupSubmitting(true);
+    try {
+      await signup(signupEmail, signupPassword);
+      selectRole('victim');
+      // After signup+role, the component will re-render and show the normal victim registration form
+    } catch (err) {
+      setSignupError('Failed to create account. Please try again.');
+    } finally {
+      setIsSignupSubmitting(false);
+    }
+  };
 
   const handleUseMyLocation = () => {
     if (navigator.geolocation) {
@@ -237,6 +272,89 @@ export default function VictimDashboard() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // If user is not yet a victim (first time from signup flow), show account creation inside dashboard
+  if (!user || user.role !== 'victim') {
+    return (
+      <div className="min-h-screen bg-background">
+        {/* Header */}
+        <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 hero-gradient rounded-lg">
+                <Droplets className="w-6 h-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="font-bold text-foreground">FloodRelief</h1>
+                <p className="text-xs text-muted-foreground">Victim Portal</p>
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/auth')}>
+              Back to Auth
+            </Button>
+          </div>
+        </header>
+
+        <main className="container mx-auto px-4 py-8 max-w-2xl">
+          <div className="text-center mb-8 animate-fade-in">
+            <h1 className="text-3xl font-bold mb-2">Create Victim Account</h1>
+            <p className="text-muted-foreground">
+              Enter your email and password to create your account, then you can register for shelter.
+            </p>
+          </div>
+
+          <Card variant="elevated" className="animate-slide-up">
+            <CardHeader>
+              <CardTitle>Account Details</CardTitle>
+              <CardDescription>This account will be used to access the victim dashboard.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleVictimSignup} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="victim-email">Email *</Label>
+                  <Input
+                    id="victim-email"
+                    type="email"
+                    placeholder="Enter your email"
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="victim-password">Password *</Label>
+                  <Input
+                    id="victim-password"
+                    type="password"
+                    placeholder="Create a password"
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
+                    minLength={6}
+                    required
+                  />
+                </div>
+
+                {signupError && (
+                  <p className="text-sm text-destructive">{signupError}</p>
+                )}
+
+                <Button
+                  type="submit"
+                  variant="hero"
+                  className="w-full"
+                  size="lg"
+                  disabled={isSignupSubmitting}
+                >
+                  {isSignupSubmitting ? 'Creating account...' : 'Create Account & Continue'}
+                </Button>
+              </form>
             </CardContent>
           </Card>
         </main>

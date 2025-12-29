@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { UserRole } from '@/types';
 import { Users, HandHeart, Building2, ArrowRight, Droplets } from 'lucide-react';
-import { toast } from 'sonner';
 
 const roles: { role: UserRole; title: string; description: string; icon: React.ReactNode; color: string }[] = [
   {
@@ -32,21 +31,24 @@ const roles: { role: UserRole; title: string; description: string; icon: React.R
 ];
 
 export default function RoleSelectionPage() {
-  const { selectRole, user } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   React.useEffect(() => {
-    if (!user) {
-      navigate('/auth');
-    } else if (user.role) {
+    if (user?.role) {
       navigate(`/${user.role}`);
     }
   }, [user, navigate]);
 
   const handleRoleSelect = (role: UserRole) => {
-    selectRole(role);
-    toast.success(`Welcome! You're now registered as a ${role}.`);
-    navigate(`/${role}`);
+    // Go straight to that role's dashboard in signup mode
+    if (role === 'victim') {
+      navigate('/victim?signup=true');
+    } else if (role === 'volunteer') {
+      navigate('/volunteer?signup=true');
+    } else if (role === 'coordinator') {
+      navigate('/coordinator?signup=true');
+    }
   };
 
   return (
@@ -66,48 +68,44 @@ export default function RoleSelectionPage() {
 
       {/* Main Content */}
       <main className="flex-1 container mx-auto px-4 py-12 flex flex-col items-center justify-center">
-        <div className="text-center mb-12 animate-fade-in">
-          <h1 className="text-3xl md:text-4xl font-bold mb-4">
-            How would you like to <span className="text-gradient">participate</span>?
-          </h1>
-          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            Choose your role in the flood relief effort. Each role has specific responsibilities 
-            and features designed to maximize our collective impact.
-          </p>
-        </div>
+        <div className="w-full max-w-5xl">
+          <div className="text-center mb-8 animate-fade-in">
+            <h1 className="text-3xl md:text-4xl font-bold mb-4">
+              Choose how you want to <span className="text-gradient">participate</span>
+            </h1>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              Click a role below. You'll be taken to that dashboard, where you can enter your email
+              and password to create your account for that role.
+            </p>
+          </div>
 
-        <div className="grid md:grid-cols-3 gap-6 w-full max-w-5xl">
-          {roles.map((item, index) => (
-            <Card
-              key={item.role}
-              variant="stat"
-              className={`${item.color} cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300 animate-slide-up`}
-              style={{ animationDelay: `${index * 100}ms` }}
-              onClick={() => handleRoleSelect(item.role)}
-            >
-              <CardHeader>
-                <div className="p-3 w-fit rounded-xl bg-secondary mb-4">
-                  {item.icon}
-                </div>
-                <CardTitle className="text-xl">{item.title}</CardTitle>
-                <CardDescription className="text-base">
-                  {item.description}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant="ghost" className="w-full justify-between group">
-                  Select this role
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        <div className="mt-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            You can only select one role per account. Choose wisely based on how you can best contribute.
-          </p>
+          <div className="grid md:grid-cols-3 gap-6">
+            {roles.map((item, index) => (
+              <Card
+                key={item.role}
+                variant="stat"
+                className={`${item.color} cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300 animate-slide-up`}
+                style={{ animationDelay: `${index * 100}ms` }}
+                onClick={() => handleRoleSelect(item.role)}
+              >
+                <CardHeader>
+                  <div className="p-3 w-fit rounded-xl bg-secondary mb-4">
+                    {item.icon}
+                  </div>
+                  <CardTitle className="text-xl">{item.title}</CardTitle>
+                  <CardDescription className="text-base">
+                    {item.description}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button variant="ghost" className="w-full justify-between group">
+                    Go to {item.title} dashboard
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       </main>
     </div>

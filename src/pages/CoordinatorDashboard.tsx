@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useData } from '@/contexts/DataContext';
 import { Button } from '@/components/ui/button';
@@ -48,7 +48,7 @@ const SKILLS: { value: VolunteerSkill; label: string }[] = [
 ];
 
 export default function CoordinatorDashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, signup, selectRole } = useAuth();
   const { 
     shelters, 
     addShelter, 
@@ -63,17 +63,51 @@ export default function CoordinatorDashboard() {
     volunteers
   } = useData();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   
   // Find coordinator's shelter
   const myShelter = shelters.find(s => s.coordinatorId === user?.id);
   const [isSetupMode, setIsSetupMode] = useState(!myShelter);
   const [activeTab, setActiveTab] = useState('overview');
 
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupError, setSignupError] = useState('');
+  const [isSignupSubmitting, setIsSignupSubmitting] = useState(false);
+
+  const isSignupMode = searchParams.get('signup') === 'true';
+
   React.useEffect(() => {
-    if (!user || user.role !== 'coordinator') {
+    if (!user && !isSignupMode) {
       navigate('/auth');
+      return;
     }
-  }, [user, navigate]);
+
+    if (user && user.role && user.role !== 'coordinator') {
+      navigate(`/${user.role}`);
+    }
+  }, [user, navigate, isSignupMode]);
+
+  const handleCoordinatorSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSignupError('');
+
+    if (!signupEmail || !signupPassword) {
+      setSignupError('Please enter email and password.');
+      return;
+    }
+
+    setIsSignupSubmitting(true);
+    try {
+      await signup(signupEmail, signupPassword);
+      selectRole('coordinator');
+      // After signup+role, component re-renders and shows normal coordinator dashboard
+    } catch (err) {
+      setSignupError('Failed to create account. Please try again.');
+    } finally {
+      setIsSignupSubmitting(false);
+    }
+  };
 
   const myResources = myShelter ? getResourcesByShelter(myShelter.id) : [];
   const myTasks = myShelter ? getTasksByShelter(myShelter.id) : [];
@@ -86,6 +120,88 @@ export default function CoordinatorDashboard() {
     logout();
     navigate('/');
   };
+
+  // If user is not yet a coordinator (first time from signup flow), show account creation inside dashboard
+  if (!user || user.role !== 'coordinator') {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 hero-gradient rounded-lg">
+                <Droplets className="w-6 h-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="font-bold text-foreground">FloodRelief</h1>
+                <p className="text-xs text-muted-foreground">Coordinator Portal</p>
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/auth')}>
+              Back to Auth
+            </Button>
+          </div>
+        </header>
+
+        <main className="container mx-auto px-4 py-8 max-w-2xl">
+          <div className="text-center mb-8 animate-fade-in">
+            <h1 className="text-3xl font-bold mb-2">Create Coordinator Account</h1>
+            <p className="text-muted-foreground">
+              Enter your email and password to create your coordinator account, then you can register your shelter.
+            </p>
+          </div>
+
+          <Card variant="elevated" className="animate-slide-up">
+            <CardHeader>
+              <CardTitle>Account Details</CardTitle>
+              <CardDescription>This account will be used to access the coordinator dashboard.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCoordinatorSignup} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="coordinator-email">Email *</Label>
+                  <Input
+                    id="coordinator-email"
+                    type="email"
+                    placeholder="Enter your email"
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="coordinator-password">Password *</Label>
+                  <Input
+                    id="coordinator-password"
+                    type="password"
+                    placeholder="Create a password"
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
+                    minLength={6}
+                    required
+                  />
+                </div>
+
+                {signupError && (
+                  <p className="text-sm text-destructive">{signupError}</p>
+                )}
+
+                <Button
+                  type="submit"
+                  variant="hero"
+                  className="w-full"
+                  size="lg"
+                  disabled={isSignupSubmitting}
+                >
+                  {isSignupSubmitting ? 'Creating account...' : 'Create Account & Continue'}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   if (isSetupMode) {
     return (
@@ -235,6 +351,29 @@ export default function CoordinatorDashboard() {
                       <p className="font-medium">{myShelter.managerContact}</p>
                     </div>
                   </div>
+                  {myShelter.managerAddress && (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Manager Address</p>
+                      <p className="font-medium">{myShelter.managerAddress}</p>
+                    </div>
+                  )}
+                  {(myShelter.managerState || myShelter.managerPincode) && (
+                    <div className="grid grid-cols-2 gap-4">
+                      {myShelter.managerState && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Manager State</p>
+                          <p className="font-medium">{myShelter.managerState}</p>
+                        </div>
+                      )}
+                      {myShelter.managerPincode && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Manager Pincode</p>
+                          <p className="font-medium">{myShelter.managerPincode}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
                   <div className="p-4 bg-secondary/50 rounded-xl">
                     <div className="flex items-center gap-2 mb-2">
                       <Zap className="w-4 h-4 text-primary" />
@@ -365,6 +504,9 @@ function ShelterSetup({
     contactNumber: '',
     managerName: '',
     managerContact: '',
+    managerAddress: '',
+    managerState: '',
+    managerPincode: ''
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -385,6 +527,9 @@ function ShelterSetup({
       contactNumber: form.contactNumber,
       managerName: form.managerName,
       managerContact: form.managerContact,
+      managerAddress: form.managerAddress || undefined,
+      managerState: form.managerState || undefined,
+      managerPincode: form.managerPincode || undefined,
       coordinatorId: userId,
     });
 
@@ -539,6 +684,32 @@ function ShelterSetup({
                       value={form.managerContact}
                       onChange={(e) => setForm(prev => ({ ...prev, managerContact: e.target.value }))}
                       required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2 mt-4">
+                  <Label>Manager Address Line 1</Label>
+                  <Input
+                    placeholder="Street address"
+                    value={form.managerAddress || ''}
+                    onChange={(e) => setForm(prev => ({ ...prev, managerAddress: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div className="space-y-2">
+                    <Label>Manager State</Label>
+                    <Input
+                      placeholder="State"
+                      value={form.managerState || ''}
+                      onChange={(e) => setForm(prev => ({ ...prev, managerState: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Manager Pincode</Label>
+                    <Input
+                      placeholder="Pincode"
+                      value={form.managerPincode || ''}
+                      onChange={(e) => setForm(prev => ({ ...prev, managerPincode: e.target.value }))}
                     />
                   </div>
                 </div>
