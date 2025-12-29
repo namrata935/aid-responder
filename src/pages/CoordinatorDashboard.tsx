@@ -18,7 +18,6 @@ import {
   Package,
   ClipboardList,
   Users,
-  Heart,
   LogOut,
   Plus,
   RefreshCw,
@@ -59,7 +58,6 @@ export default function CoordinatorDashboard() {
     getTasksByShelter,
     addTask,
     runAIAssignment,
-    donations,
     volunteers
   } = useData();
   const navigate = useNavigate();
@@ -111,7 +109,6 @@ export default function CoordinatorDashboard() {
 
   const myResources = myShelter ? getResourcesByShelter(myShelter.id) : [];
   const myTasks = myShelter ? getTasksByShelter(myShelter.id) : [];
-  const myDonations = donations.filter(d => d.shelterId === myShelter?.id);
   const activeVolunteers = volunteers.filter(v => 
     v.availability === 'available' && v.profileCompleted
   ).length;
@@ -244,7 +241,7 @@ export default function CoordinatorDashboard() {
 
       <main className="container mx-auto px-4 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4">
+          <TabsList className="grid w-full max-w-2xl grid-cols-3">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <Building2 className="w-4 h-4" />
               Overview
@@ -257,15 +254,11 @@ export default function CoordinatorDashboard() {
               <ClipboardList className="w-4 h-4" />
               Tasks
             </TabsTrigger>
-            <TabsTrigger value="donations" className="flex items-center gap-2">
-              <Heart className="w-4 h-4" />
-              Donations
-            </TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="animate-fade-in">
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
               <StatCard 
                 title="Shelter Capacity"
                 value={`${myShelter.currentOccupancy}/${myShelter.totalCapacity}`}
@@ -286,13 +279,6 @@ export default function CoordinatorDashboard() {
                 subtitle="pending"
                 icon={<ClipboardList className="w-5 h-5" />}
                 color="warning"
-              />
-              <StatCard 
-                title="Donations"
-                value={myDonations.length.toString()}
-                subtitle="received"
-                icon={<Heart className="w-5 h-5" />}
-                color="success"
               />
             </div>
 
@@ -405,43 +391,6 @@ export default function CoordinatorDashboard() {
               addTask={addTask}
               runAIAssignment={runAIAssignment}
             />
-          </TabsContent>
-
-          {/* Donations Tab */}
-          <TabsContent value="donations" className="animate-fade-in">
-            <div className="space-y-4">
-              <h2 className="text-2xl font-bold">Donation Records</h2>
-              {myDonations.length === 0 ? (
-                <Card className="p-12 text-center">
-                  <Heart className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
-                  <h3 className="text-lg font-medium mb-2">No Donations Yet</h3>
-                  <p className="text-muted-foreground">
-                    Donations will appear here when received.
-                  </p>
-                </Card>
-              ) : (
-                <div className="grid gap-4">
-                  {myDonations.map(donation => (
-                    <Card key={donation.id}>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <Badge variant="success">{donation.resourceType}</Badge>
-                            <p className="font-medium mt-2">{donation.quantity} units</p>
-                            {donation.donorName && (
-                              <p className="text-sm text-muted-foreground">From: {donation.donorName}</p>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {new Date(donation.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
           </TabsContent>
         </Tabs>
       </main>
