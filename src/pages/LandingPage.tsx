@@ -44,6 +44,12 @@ export default function LandingPage() {
                 Donate
               </Button>
             </Link>
+            <Link to="/shelters">
+              <Button variant="outline" size="sm">
+                <MapPin className="w-4 h-4 mr-2" />
+                Search Shelters
+              </Button>
+            </Link>
             <Link to="/auth">
               <Button size="sm">
                 Get Started
@@ -82,6 +88,12 @@ export default function LandingPage() {
                 <Button variant="hero" size="xl">
                   Join Relief Effort
                   <ArrowRight className="w-5 h-5" />
+                </Button>
+              </Link>
+              <Link to="/shelters">
+                <Button variant="outline" size="xl">
+                  <MapPin className="w-5 h-5" />
+                  Search Shelters
                 </Button>
               </Link>
               <Link to="/donate">
@@ -279,12 +291,20 @@ export default function LandingPage() {
               <p className="text-lg opacity-90 mb-8 max-w-2xl mx-auto">
                 Join our relief coordination platform and help save lives during flood emergencies.
               </p>
-              <Link to="/auth">
-                <Button size="xl" className="bg-primary-foreground text-primary hover:bg-primary-foreground/90">
-                  Get Started Now
-                  <ArrowRight className="w-5 h-5" />
-                </Button>
-              </Link>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center sm:justify-center">
+                <Link to="/auth">
+                  <Button size="xl" className="bg-primary-foreground text-primary hover:bg-primary-foreground/90">
+                    Get Started Now
+                    <ArrowRight className="w-5 h-5" />
+                  </Button>
+                </Link>
+                <Link to="/shelters">
+                  <Button size="xl" variant="outline" className="bg-primary-foreground/10 text-primary-foreground hover:bg-primary-foreground/20">
+                    <MapPin className="w-5 h-5 mr-2" />
+                    Search Shelters
+                  </Button>
+                </Link>
+              </div>
             </CardContent>
           </Card>
         </div>

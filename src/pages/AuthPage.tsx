@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import type { UserRole } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,7 +15,7 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const { login, signup, user } = useAuth();
+  const { login, signup, user, selectRole } = useAuth();
   const navigate = useNavigate();
 
   // If user is already logged in, redirect to role selection or dashboard
@@ -55,6 +56,27 @@ export default function AuthPage() {
     } catch (err) {
       setError('Failed to create account. Please try again.');
     } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRoleSignup = async (e: React.MouseEvent, role: UserRole) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    try {
+      await signup(email, password);
+      // Immediately set role for the new user and go to the correct dashboard
+      selectRole(role);
+      toast.success(
+        role === 'volunteer'
+          ? 'Account created as Volunteer!'
+          : 'Account created as Shelter Coordinator!'
+      );
+      navigate(`/${role}`);
+    } catch (err) {
+      setError('Failed to create account. Please try again.');
       setIsLoading(false);
     }
   };
@@ -234,11 +256,42 @@ export default function AuthPage() {
                         {error}
                       </div>
                     )}
-                    
-                    <Button type="submit" variant="hero" className="w-full" size="lg" disabled={isLoading}>
-                      {isLoading ? 'Creating Account...' : 'Create Account'}
-                      <ArrowRight className="w-4 h-4" />
-                    </Button>
+
+                    <div className="space-y-3">
+                      <Button
+                        type="submit"
+                        variant="hero"
+                        className="w-full"
+                        size="lg"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? 'Creating Account...' : 'Create Account & Choose Role'}
+                        <ArrowRight className="w-4 h-4" />
+                      </Button>
+
+                      <div className="text-xs text-muted-foreground text-center mt-1">
+                        Or get started directly as:
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={isLoading}
+                          onClick={(e) => handleRoleSignup(e, 'volunteer')}
+                        >
+                          Signup as Volunteer
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={isLoading}
+                          onClick={(e) => handleRoleSignup(e, 'coordinator')}
+                        >
+                          Signup as Shelter Manager
+                        </Button>
+                      </div>
+                    </div>
                   </form>
                 </TabsContent>
               </Tabs>

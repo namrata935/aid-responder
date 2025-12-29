@@ -13,6 +13,7 @@ import VolunteerDashboard from "./pages/VolunteerDashboard";
 import CoordinatorDashboard from "./pages/CoordinatorDashboard";
 import DonatePage from "./pages/DonatePage";
 import NotFound from "./pages/NotFound";
+import SearchSheltersPage from "./pages/SearchSheltersPage";
 
 const queryClient = new QueryClient();
 
@@ -48,6 +49,7 @@ function AppRoutes() {
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/role-selection" element={<RoleSelectionPage />} />
       <Route path="/donate" element={<DonatePage />} />
+      <Route path="/shelters" element={<SearchSheltersPage />} />
       <Route 
         path="/victim" 
         element={
