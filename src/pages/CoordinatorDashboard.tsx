@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { useData } from '@/contexts/DataContext';
+import { useAuth } from '@/contexts/AuthContext.supabase';
+import { useData } from '@/contexts/DataContext.supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -98,10 +98,13 @@ export default function CoordinatorDashboard() {
     setIsSignupSubmitting(true);
     try {
       await signup(signupEmail, signupPassword);
-      selectRole('coordinator');
+      await selectRole('coordinator');
       // After signup+role, component re-renders and shows normal coordinator dashboard
+      toast.success('Account created! Please set up your shelter.');
     } catch (err) {
-      setSignupError('Failed to create account. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create account. Please try again.';
+      setSignupError(errorMessage);
+      console.error('Signup error:', err);
     } finally {
       setIsSignupSubmitting(false);
     }
@@ -458,32 +461,37 @@ function ShelterSetup({
     managerPincode: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    addShelter({
-      name: form.name,
-      address: form.address,
-      city: form.city,
-      state: form.state,
-      pincode: form.pincode,
-      location: {
-        latitude: parseFloat(form.latitude),
-        longitude: parseFloat(form.longitude),
-      },
-      totalCapacity: parseInt(form.totalCapacity),
-      currentOccupancy: 0,
-      contactNumber: form.contactNumber,
-      managerName: form.managerName,
-      managerContact: form.managerContact,
-      managerAddress: form.managerAddress || undefined,
-      managerState: form.managerState || undefined,
-      managerPincode: form.managerPincode || undefined,
-      coordinatorId: userId,
-    });
+    try {
+      await addShelter({
+        name: form.name,
+        address: form.address,
+        city: form.city,
+        state: form.state,
+        pincode: form.pincode,
+        location: {
+          latitude: parseFloat(form.latitude),
+          longitude: parseFloat(form.longitude),
+        },
+        totalCapacity: parseInt(form.totalCapacity),
+        currentOccupancy: 0,
+        contactNumber: form.contactNumber,
+        managerName: form.managerName,
+        managerContact: form.managerContact,
+        managerAddress: form.managerAddress || undefined,
+        managerState: form.managerState || undefined,
+        managerPincode: form.managerPincode || undefined,
+        coordinatorId: userId,
+      });
 
-    toast.success('Shelter registered successfully!');
-    onComplete();
+      toast.success('Shelter registered successfully!');
+      onComplete();
+    } catch (error) {
+      console.error('Error creating shelter:', error);
+      toast.error('Failed to register shelter. Please try again.');
+    }
   };
 
   return (
@@ -695,20 +703,25 @@ function ResourcesSection({
     unit: '',
   });
 
-  const handleAddResource = () => {
+  const handleAddResource = async () => {
     if (!newResource.type) return;
     
-    addResource({
-      shelterId,
-      type: newResource.type,
-      quantityAvailable: parseInt(newResource.quantityAvailable) || 0,
-      quantityNeeded: parseInt(newResource.quantityNeeded) || 0,
-      unit: newResource.unit,
-    });
-    
-    setNewResource({ type: '', quantityAvailable: '', quantityNeeded: '', unit: '' });
-    setShowAddForm(false);
-    toast.success('Resource added!');
+    try {
+      await addResource({
+        shelterId,
+        type: newResource.type,
+        quantityAvailable: parseInt(newResource.quantityAvailable) || 0,
+        quantityNeeded: parseInt(newResource.quantityNeeded) || 0,
+        unit: newResource.unit,
+      });
+      
+      setNewResource({ type: '', quantityAvailable: '', quantityNeeded: '', unit: '' });
+      setShowAddForm(false);
+      toast.success('Resource added!');
+    } catch (error) {
+      console.error('Error adding resource:', error);
+      toast.error('Failed to add resource. Please try again.');
+    }
   };
 
   return (
@@ -824,7 +837,7 @@ function TasksSection({
   tasks: Task[];
   shelterId: string;
   shelterName: string;
-  addTask: (t: any) => Task;
+  addTask: (t: any) => Promise<Task>;
   runAIAssignment: (id: string) => void;
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -844,28 +857,33 @@ function TasksSection({
     }));
   };
 
-  const handleCreateTask = () => {
+  const handleCreateTask = async () => {
     if (!newTask.title || !newTask.description) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    const task = addTask({
-      title: newTask.title,
-      description: newTask.description,
-      priority: newTask.priority,
-      status: 'created',
-      shelterId,
-      shelterName,
-      requiredSkills: newTask.requiredSkills,
-    });
+    try {
+      const task = await addTask({
+        title: newTask.title,
+        description: newTask.description,
+        priority: newTask.priority,
+        status: 'created',
+        shelterId,
+        shelterName,
+        requiredSkills: newTask.requiredSkills,
+      });
 
-    // Run AI assignment
-    runAIAssignment(task.id);
+      // Run AI assignment
+      await runAIAssignment(task.id);
     
-    setNewTask({ title: '', description: '', priority: 'medium', requiredSkills: [] });
-    setShowCreateForm(false);
-    toast.success('Task created and AI assignment triggered!');
+      setNewTask({ title: '', description: '', priority: 'medium', requiredSkills: [] });
+      setShowCreateForm(false);
+      toast.success('Task created and AI assignment triggered!');
+    } catch (error) {
+      console.error('Error creating task:', error);
+      toast.error('Failed to create task. Please try again.');
+    }
   };
 
   const getPriorityIcon = (priority: string) => {
@@ -1002,9 +1020,14 @@ function TasksSection({
                     <Button 
                       variant="outline" 
                       size="sm"
-                      onClick={() => {
-                        runAIAssignment(task.id);
-                        toast.info('Re-running AI assignment...');
+                      onClick={async () => {
+                        try {
+                          await runAIAssignment(task.id);
+                          toast.info('Re-running AI assignment...');
+                        } catch (error) {
+                          console.error('Error running AI assignment:', error);
+                          toast.error('Failed to run AI assignment.');
+                        }
                       }}
                     >
                       <RefreshCw className="w-4 h-4 mr-1" />

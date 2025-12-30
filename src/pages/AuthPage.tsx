@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext.supabase';
 import type { UserRole } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,7 +47,9 @@ export default function AuthPage() {
       await login(email, password);
       toast.success('Welcome back!');
     } catch (err) {
-      setError('Invalid credentials. Please try again or sign up.');
+      const errorMessage = err instanceof Error ? err.message : 'Invalid credentials. Please try again or sign up.';
+      setError(errorMessage);
+      console.error('Login error:', err);
     } finally {
       setIsLoading(false);
     }

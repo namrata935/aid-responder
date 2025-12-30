@@ -14,7 +14,7 @@ import {
   Zap,
   ChevronRight
 } from 'lucide-react';
-import { useData } from '@/contexts/DataContext';
+import { useData } from '@/contexts/DataContext.supabase';
 
 export default function LandingPage() {
   const { shelters, resources } = useData();

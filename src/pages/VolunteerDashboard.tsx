@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { useData } from '@/contexts/DataContext';
+import { useAuth } from '@/contexts/AuthContext.supabase';
+import { useData } from '@/contexts/DataContext.supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -90,10 +90,13 @@ export default function VolunteerDashboard() {
     setIsSignupSubmitting(true);
     try {
       await signup(signupEmail, signupPassword);
-      selectRole('volunteer');
+      await selectRole('volunteer');
       // After signup+role, component re-renders and shows normal volunteer dashboard
+      toast.success('Account created! Please complete your profile.');
     } catch (err) {
-      setSignupError('Failed to create account. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create account. Please try again.';
+      setSignupError(errorMessage);
+      console.error('Signup error:', err);
     } finally {
       setIsSignupSubmitting(false);
     }
@@ -103,7 +106,7 @@ export default function VolunteerDashboard() {
   const activeTasks = myTasks.filter(t => t.status !== 'completed' && t.status !== 'declined');
   const completedTasks = myTasks.filter(t => t.status === 'completed');
 
-  const handleProfileSubmit = (e: React.FormEvent) => {
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (profileForm.skills.length === 0) {
@@ -111,28 +114,33 @@ export default function VolunteerDashboard() {
       return;
     }
 
-    const volunteerData = {
-      userId: user?.id || '',
-      name: profileForm.name,
-      contactNumber: profileForm.contactNumber,
-      city: profileForm.city,
-      skills: profileForm.skills,
-      availability: profileForm.availability,
-      location: {
-        latitude: parseFloat(profileForm.latitude),
-        longitude: parseFloat(profileForm.longitude),
-      },
-      profileCompleted: true,
-    };
+    try {
+      const volunteerData = {
+        userId: user?.id || '',
+        name: profileForm.name,
+        contactNumber: profileForm.contactNumber,
+        city: profileForm.city,
+        skills: profileForm.skills,
+        availability: profileForm.availability,
+        location: {
+          latitude: parseFloat(profileForm.latitude),
+          longitude: parseFloat(profileForm.longitude),
+        },
+        profileCompleted: true,
+      };
 
-    if (volunteer) {
-      updateVolunteer(volunteer.id, volunteerData);
-    } else {
-      addVolunteer(volunteerData);
+      if (volunteer) {
+        await updateVolunteer(volunteer.id, volunteerData);
+      } else {
+        await addVolunteer(volunteerData);
+      }
+
+      toast.success('Profile saved successfully!');
+      setActiveTab('tasks');
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      toast.error('Failed to save profile. Please try again.');
     }
-
-    toast.success('Profile saved successfully!');
-    setActiveTab('tasks');
   };
 
   const toggleSkill = (skill: VolunteerSkill) => {
@@ -144,22 +152,27 @@ export default function VolunteerDashboard() {
     }));
   };
 
-  const handleTaskAction = (taskId: string, action: 'accept' | 'decline' | 'complete') => {
+  const handleTaskAction = async (taskId: string, action: 'accept' | 'decline' | 'complete') => {
     const statusMap = {
       accept: 'accepted',
       decline: 'declined',
       complete: 'completed',
     } as const;
 
-    updateTask(taskId, { status: statusMap[action] });
-    
-    const messages = {
-      accept: 'Task accepted! Good luck!',
-      decline: 'Task declined.',
-      complete: 'Great job! Task marked as completed.',
-    };
-    
-    toast.success(messages[action]);
+    try {
+      await updateTask(taskId, { status: statusMap[action] });
+      
+      const messages = {
+        accept: 'Task accepted! Good luck!',
+        decline: 'Task declined.',
+        complete: 'Great job! Task marked as completed.',
+      };
+      
+      toast.success(messages[action]);
+    } catch (error) {
+      console.error('Error updating task:', error);
+      toast.error('Failed to update task. Please try again.');
+    }
   };
 
   const handleUseMyLocation = () => {

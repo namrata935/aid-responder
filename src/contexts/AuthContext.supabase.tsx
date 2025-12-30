@@ -71,6 +71,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (error) {
+      // Handle rate limiting specifically
+      if (error.status === 429 || error.message?.includes('429')) {
+        throw new Error('Too many requests. Please wait a few minutes before trying again.');
+      }
       throw new Error(error.message || 'Invalid credentials');
     }
 
@@ -87,6 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (error) {
+      // Handle rate limiting specifically
+      if (error.status === 429 || error.message?.includes('429')) {
+        throw new Error('Too many requests. Please wait a few minutes before trying again.');
+      }
       throw new Error(error.message || 'Failed to create account');
     }
 
@@ -143,4 +151,5 @@ export function useAuth() {
   }
   return context;
 }
+
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { useData } from '@/contexts/DataContext';
+import { useAuth } from '@/contexts/AuthContext.supabase';
+import { useData } from '@/contexts/DataContext.supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -75,10 +75,13 @@ export default function VictimDashboard() {
     setIsSignupSubmitting(true);
     try {
       await signup(signupEmail, signupPassword);
-      selectRole('victim');
+      await selectRole('victim');
       // After signup+role, the component will re-render and show the normal victim registration form
+      toast.success('Account created! Please complete your profile.');
     } catch (err) {
-      setSignupError('Failed to create account. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create account. Please try again.';
+      setSignupError(errorMessage);
+      console.error('Signup error:', err);
     } finally {
       setIsSignupSubmitting(false);
     }
@@ -115,7 +118,7 @@ export default function VictimDashboard() {
     }
 
     try {
-      const result = registerVictim({
+      const result = await registerVictim({
         visitorId: user?.id || '',
         name: formData.name,
         age: parseInt(formData.age),
