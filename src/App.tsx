@@ -16,6 +16,13 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+// Role to route mapping
+const ROLE_ROUTES: Record<string, string> = {
+  'victim': '/victim',
+  'volunteer': '/volunteer',
+  'manager': '/coordinator'
+};
+
 function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole: string }) {
   const { user, isLoading } = useAuth();
   
@@ -34,8 +41,18 @@ function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; 
     return <Navigate to="/auth" replace />;
   }
   
-  if (user.role !== allowedRole) {
-    return <Navigate to={`/${user.role || 'role-selection'}`} replace />;
+  if (!user.role) {
+    return <Navigate to="/role-selection" replace />;
+  }
+  
+  // Compare roles in lowercase to handle case mismatch
+  const userRoleLower = user.role.toLowerCase();
+  const allowedRoleLower = allowedRole.toLowerCase();
+  
+  if (userRoleLower !== allowedRoleLower) {
+    // Redirect to user's correct dashboard
+    const userRoute = ROLE_ROUTES[userRoleLower];
+    return <Navigate to={userRoute || '/role-selection'} replace />;
   }
   
   return <>{children}</>;
@@ -48,6 +65,7 @@ function AppRoutes() {
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/role-selection" element={<RoleSelectionPage />} />
       <Route path="/donate" element={<DonatePage />} />
+      
       <Route 
         path="/victim" 
         element={
@@ -56,6 +74,7 @@ function AppRoutes() {
           </ProtectedRoute>
         } 
       />
+      
       <Route 
         path="/volunteer" 
         element={
@@ -64,14 +83,16 @@ function AppRoutes() {
           </ProtectedRoute>
         } 
       />
+      
       <Route 
         path="/coordinator" 
         element={
-          <ProtectedRoute allowedRole="coordinator">
+          <ProtectedRoute allowedRole="manager">
             <CoordinatorDashboard />
           </ProtectedRoute>
         } 
       />
+      
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

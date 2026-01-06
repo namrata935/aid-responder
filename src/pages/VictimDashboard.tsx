@@ -44,7 +44,7 @@ export default function VictimDashboard() {
   });
 
   React.useEffect(() => {
-    if (!user || user.role !== 'victim') {
+    if (!user || user.role !== 'Victim') {
       navigate('/auth');
     }
   }, [user, navigate]);

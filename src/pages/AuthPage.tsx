@@ -47,28 +47,25 @@ export default function AuthPage() {
   };
 
   const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-  
-    try {
-      console.log('1️⃣ Account creation started');
-  
-      await signup(email, password);
-  
-      console.log('2️⃣ Account created, attempting navigation');
-  
-      // TEMP DEBUG NAVIGATION
-      navigate('/role-selection');
-  
-      console.log('3️⃣ Navigation called');
-    } catch (err) {
-      console.error('❌ Signup failed:', err);
-      setError('Signup failed');
-    } finally {
-      setLoading(false);
+  e.preventDefault();
+  setError('');
+  setLoading(true);
+
+  try {
+    console.log('1️⃣ Calling signup...');
+    const newUser = await signup(email, password);
+    console.log('2️⃣ Signup completed');
+    
+    if (newUser) {
+      toast.success('Account created!');
+      navigate('/role-selection', { replace: true });
     }
-  };
+  } catch (err: any) {
+    console.error('❌ Signup failed:', err);
+    setError(err.message || 'Signup failed');
+    setLoading(false);
+  }
+};
   
 
   return (
