@@ -89,16 +89,17 @@ export default function RoleSelectionPage() {
       }
 
       if (role === 'Manager') {
-        const { error } = await supabase
-          .from('managers')
-          .insert({
-            id: user.id,
-            manager_name: '',
-            contact: ''
-          });
-        
-        if (error && error.code !== '23505') throw error;
-      }
+  const { error } = await supabase
+    .from('managers')
+    .insert({
+      id: user.id,
+      manager_name: '',  // ✅ Matches your schema
+      contact: '',       // ✅ Matches your schema
+      // Other fields will be NULL initially and filled during setup
+    });
+  
+  if (error && error.code !== '23505') throw error;
+}
 
       toast.success(`Welcome! You're registered as a ${role}`);
       

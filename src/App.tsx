@@ -20,7 +20,7 @@ const queryClient = new QueryClient();
 const ROLE_ROUTES: Record<string, string> = {
   'victim': '/victim',
   'volunteer': '/volunteer',
-  'manager': '/coordinator'
+  'manager': '/manager'
 };
 
 function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole: string }) {
@@ -85,7 +85,7 @@ function AppRoutes() {
       />
       
       <Route 
-        path="/coordinator" 
+        path="/manager" 
         element={
           <ProtectedRoute allowedRole="manager">
             <CoordinatorDashboard />

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useData } from '@/contexts/DataContext';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,6 @@ import {
   Package,
   ClipboardList,
   Users,
-  Heart,
   LogOut,
   Plus,
   RefreshCw,
@@ -29,78 +28,198 @@ import {
   Minus,
   CheckCircle,
   Clock,
-  Zap
+  Zap,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Shelter, Resource, Task, VolunteerSkill, TaskPriority } from '@/types';
 
 const RESOURCE_TYPES = ['food', 'water', 'medicine', 'clothes', 'blankets', 'other'] as const;
-const SKILLS: { value: VolunteerSkill; label: string }[] = [
-  { value: 'first_aid', label: 'First Aid' },
-  { value: 'driving', label: 'Driving' },
-  { value: 'cooking', label: 'Cooking' },
-  { value: 'rescue', label: 'Rescue' },
-  { value: 'logistics', label: 'Logistics' },
-  { value: 'medical', label: 'Medical' },
-  { value: 'counseling', label: 'Counseling' },
-  { value: 'communication', label: 'Communication' },
-  { value: 'construction', label: 'Construction' },
-];
+
+type ResourceType = typeof RESOURCE_TYPES[number];
+type TaskPriority = 'High' | 'Medium' | 'Low';
+type TaskStatus = 'Created' | 'Assigned' | 'Completed';
+
+interface Shelter {
+  shelter_id: number;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+  latitude: number;
+  longitude: number;
+  capacity: number;
+  current_occupancy: number;
+  contact: string;
+  manager_id: string;
+}
+
+interface Resource {
+  resource_id: number;
+  shelter_id: number;
+  type: string;
+  quantity: number;
+  needed: number;
+  last_updated: string;
+}
+
+interface Task {
+  task_id: number;
+  shelter_id: number;
+  title: string;
+  description: string;
+  priority: string;
+  status: string;
+  volunteers_required: number;
+  created_at: string;
+}
+
+interface ManagerProfile {
+  id: string;
+  manager_name: string;
+  contact: string;
+  city: string;
+  state: string;
+  pincode: string;
+  latitude: number;
+  longitude: number;
+}
 
 export default function CoordinatorDashboard() {
   const { user, logout } = useAuth();
-  const { 
-    shelters, 
-    addShelter, 
-    updateShelter,
-    getResourcesByShelter,
-    addResource,
-    updateResource,
-    getTasksByShelter,
-    addTask,
-    runAIAssignment,
-    donations,
-    volunteers
-  } = useData();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   
-  // Find coordinator's shelter
-  const myShelter = shelters.find(s => s.coordinatorId === user?.id);
-  const [isSetupMode, setIsSetupMode] = useState(!myShelter);
+  const [profile, setProfile] = useState<ManagerProfile | null>(null);
+  const [shelter, setShelter] = useState<Shelter | null>(null);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSetupMode, setIsSetupMode] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
-  React.useEffect(() => {
-    if (!user || user.role !== 'coordinator') {
+  // Check authentication and load data
+  useEffect(() => {
+    if (!user || user.role !== 'Manager') {
       navigate('/auth');
+      return;
     }
+
+    loadData();
   }, [user, navigate]);
 
-  const myResources = myShelter ? getResourcesByShelter(myShelter.id) : [];
-  const myTasks = myShelter ? getTasksByShelter(myShelter.id) : [];
-  const myDonations = donations.filter(d => d.shelterId === myShelter?.id);
-  const activeVolunteers = volunteers.filter(v => 
-    v.availability === 'available' && v.profileCompleted
-  ).length;
+  const loadData = async () => {
+    if (!user) return;
 
-  const handleLogout = () => {
-    logout();
-    navigate('/');
+    try {
+      // Load manager profile
+      const { data: managerData, error: managerError } = await supabase
+        .from('managers')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      // If no manager row exists or profile is incomplete, show setup
+      if (!managerData || !managerData.manager_name || !managerData.contact || !managerData.city) {
+        setProfile(managerData);
+        setIsSetupMode(true);
+        setIsLoading(false);
+        return;
+      }
+
+      setProfile(managerData);
+
+      // Load shelter managed by this manager
+      const { data: shelterData, error: shelterError } = await supabase
+        .from('shelters')
+        .select('*')
+        .eq('manager_id', user.id)
+        .maybeSingle();
+
+      if (shelterError) {
+        console.error('Shelter load error:', shelterError);
+      }
+
+      if (!shelterData) {
+        setIsSetupMode(true);
+        setIsLoading(false);
+        return;
+      }
+
+      setShelter(shelterData);
+
+      // Load resources for this shelter
+      const { data: resourcesData, error: resourcesError } = await supabase
+        .from('resources')
+        .select('*')
+        .eq('shelter_id', shelterData.shelter_id);
+
+      if (resourcesError) throw resourcesError;
+      setResources(resourcesData || []);
+
+      // Load tasks for this shelter
+      const { data: tasksData, error: tasksError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('shelter_id', shelterData.shelter_id)
+        .order('created_at', { ascending: false });
+
+      if (tasksError) throw tasksError;
+      setTasks(tasksData || []);
+
+    } catch (err: any) {
+      console.error('Error loading data:', err);
+      if (err.code === 'PGRST116') {
+        setIsSetupMode(true);
+      } else {
+        toast.error('Failed to load dashboard data');
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      logout();
+      navigate('/auth', { replace: true });
+    } catch (err) {
+      console.error('Logout error:', err);
+      toast.error('Logout failed');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isSetupMode) {
     return (
       <ShelterSetup 
         userId={user?.id || ''} 
-        onComplete={() => setIsSetupMode(false)} 
-        addShelter={addShelter}
+        profile={profile}
+        onComplete={() => {
+          setIsSetupMode(false);
+          loadData();
+        }}
         onLogout={handleLogout}
       />
     );
   }
 
-  if (!myShelter) {
+  if (!shelter || !profile) {
     return null;
   }
+
+  const activeTasksCount = tasks.filter(t => t.status !== 'Completed').length;
 
   return (
     <div className="min-h-screen bg-background">
@@ -117,7 +236,7 @@ export default function CoordinatorDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <Badge variant="default">{myShelter.name}</Badge>
+            <Badge variant="default">{shelter.name}</Badge>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout
@@ -128,7 +247,7 @@ export default function CoordinatorDashboard() {
 
       <main className="container mx-auto px-4 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4">
+          <TabsList className="grid w-full max-w-2xl grid-cols-3">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <Building2 className="w-4 h-4" />
               Overview
@@ -141,42 +260,31 @@ export default function CoordinatorDashboard() {
               <ClipboardList className="w-4 h-4" />
               Tasks
             </TabsTrigger>
-            <TabsTrigger value="donations" className="flex items-center gap-2">
-              <Heart className="w-4 h-4" />
-              Donations
-            </TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="animate-fade-in">
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
               <StatCard 
                 title="Shelter Capacity"
-                value={`${myShelter.currentOccupancy}/${myShelter.totalCapacity}`}
+                value={`${shelter.current_occupancy}/${shelter.capacity}`}
                 subtitle="people"
                 icon={<Users className="w-5 h-5" />}
                 color="primary"
               />
               <StatCard 
                 title="Resources"
-                value={myResources.length.toString()}
+                value={resources.length.toString()}
                 subtitle="types tracked"
                 icon={<Package className="w-5 h-5" />}
                 color="info"
               />
               <StatCard 
                 title="Active Tasks"
-                value={myTasks.filter(t => t.status !== 'completed').length.toString()}
+                value={activeTasksCount.toString()}
                 subtitle="pending"
                 icon={<ClipboardList className="w-5 h-5" />}
                 color="warning"
-              />
-              <StatCard 
-                title="Donations"
-                value={myDonations.length.toString()}
-                subtitle="received"
-                icon={<Heart className="w-5 h-5" />}
-                color="success"
               />
             </div>
 
@@ -192,25 +300,27 @@ export default function CoordinatorDashboard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-muted-foreground">Name</p>
-                      <p className="font-medium">{myShelter.name}</p>
+                      <p className="font-medium">{shelter.name}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Contact</p>
-                      <p className="font-medium">{myShelter.contactNumber}</p>
+                      <p className="font-medium">{shelter.contact}</p>
                     </div>
                     <div className="col-span-2">
                       <p className="text-sm text-muted-foreground">Address</p>
-                      <p className="font-medium">{myShelter.address}, {myShelter.city}, {myShelter.state} - {myShelter.pincode}</p>
+                      <p className="font-medium">
+                        {shelter.address}, {shelter.city}, {shelter.state} - {shelter.pincode}
+                      </p>
                     </div>
                   </div>
                   
                   <div>
                     <div className="flex justify-between text-sm mb-2">
                       <span>Capacity Utilization</span>
-                      <span>{Math.round((myShelter.currentOccupancy / myShelter.totalCapacity) * 100)}%</span>
+                      <span>{Math.round((shelter.current_occupancy / shelter.capacity) * 100)}%</span>
                     </div>
                     <Progress 
-                      value={(myShelter.currentOccupancy / myShelter.totalCapacity) * 100} 
+                      value={(shelter.current_occupancy / shelter.capacity) * 100} 
                       className="h-3"
                     />
                   </div>
@@ -228,19 +338,28 @@ export default function CoordinatorDashboard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-muted-foreground">Manager Name</p>
-                      <p className="font-medium">{myShelter.managerName}</p>
+                      <p className="font-medium">{profile.manager_name}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Manager Contact</p>
-                      <p className="font-medium">{myShelter.managerContact}</p>
+                      <p className="font-medium">{profile.contact}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-sm text-muted-foreground">Location</p>
+                      <p className="font-medium">
+                        {profile.city}, {profile.state} - {profile.pincode}
+                      </p>
                     </div>
                   </div>
+                  
                   <div className="p-4 bg-secondary/50 rounded-xl">
                     <div className="flex items-center gap-2 mb-2">
-                      <Zap className="w-4 h-4 text-primary" />
-                      <span className="font-medium">Available Volunteers</span>
+                      <MapPin className="w-4 h-4 text-primary" />
+                      <span className="font-medium">Coordinates</span>
                     </div>
-                    <p className="text-2xl font-bold text-primary">{activeVolunteers}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {shelter.latitude.toFixed(4)}, {shelter.longitude.toFixed(4)}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -250,59 +369,20 @@ export default function CoordinatorDashboard() {
           {/* Resources Tab */}
           <TabsContent value="resources" className="animate-fade-in">
             <ResourcesSection 
-              resources={myResources} 
-              shelterId={myShelter.id}
-              addResource={addResource}
-              updateResource={updateResource}
+              resources={resources} 
+              shelterId={shelter.shelter_id}
+              onResourcesChange={loadData}
             />
           </TabsContent>
 
           {/* Tasks Tab */}
           <TabsContent value="tasks" className="animate-fade-in">
             <TasksSection 
-              tasks={myTasks}
-              shelterId={myShelter.id}
-              shelterName={myShelter.name}
-              addTask={addTask}
-              runAIAssignment={runAIAssignment}
+              tasks={tasks}
+              shelterId={shelter.shelter_id}
+              shelterName={shelter.name}
+              onTasksChange={loadData}
             />
-          </TabsContent>
-
-          {/* Donations Tab */}
-          <TabsContent value="donations" className="animate-fade-in">
-            <div className="space-y-4">
-              <h2 className="text-2xl font-bold">Donation Records</h2>
-              {myDonations.length === 0 ? (
-                <Card className="p-12 text-center">
-                  <Heart className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
-                  <h3 className="text-lg font-medium mb-2">No Donations Yet</h3>
-                  <p className="text-muted-foreground">
-                    Donations will appear here when received.
-                  </p>
-                </Card>
-              ) : (
-                <div className="grid gap-4">
-                  {myDonations.map(donation => (
-                    <Card key={donation.id}>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <Badge variant="success">{donation.resourceType}</Badge>
-                            <p className="font-medium mt-2">{donation.quantity} units</p>
-                            {donation.donorName && (
-                              <p className="text-sm text-muted-foreground">From: {donation.donorName}</p>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {new Date(donation.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
           </TabsContent>
         </Tabs>
       </main>
@@ -344,16 +424,35 @@ function StatCard({ title, value, subtitle, icon, color }: {
 
 function ShelterSetup({ 
   userId, 
-  onComplete, 
-  addShelter,
+  profile,
+  onComplete,
   onLogout
 }: { 
-  userId: string; 
+  userId: string;
+  profile: ManagerProfile | null;
   onComplete: () => void;
-  addShelter: (shelter: any) => any;
   onLogout: () => void;
 }) {
-  const [form, setForm] = useState({
+  const [step, setStep] = useState<'profile' | 'shelter'>(() => {
+    // Only go to shelter step if profile exists AND is complete
+    if (profile && profile.manager_name && profile.contact && profile.city) {
+      return 'shelter';
+    }
+    return 'profile';
+  });
+  const [loading, setLoading] = useState(false);
+  
+  const [profileForm, setProfileForm] = useState({
+    manager_name: profile?.manager_name || '',
+    contact: profile?.contact || '',
+    city: profile?.city || '',
+    state: profile?.state || '',
+    pincode: profile?.pincode || '',
+    latitude: profile?.latitude?.toString() || '',
+    longitude: profile?.longitude?.toString() || '',
+  });
+
+  const [shelterForm, setShelterForm] = useState({
     name: '',
     address: '',
     city: '',
@@ -361,35 +460,80 @@ function ShelterSetup({
     pincode: '',
     latitude: '',
     longitude: '',
-    totalCapacity: '',
-    contactNumber: '',
-    managerName: '',
-    managerContact: '',
+    capacity: '',
+    contact: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    addShelter({
-      name: form.name,
-      address: form.address,
-      city: form.city,
-      state: form.state,
-      pincode: form.pincode,
-      location: {
-        latitude: parseFloat(form.latitude),
-        longitude: parseFloat(form.longitude),
-      },
-      totalCapacity: parseInt(form.totalCapacity),
-      currentOccupancy: 0,
-      contactNumber: form.contactNumber,
-      managerName: form.managerName,
-      managerContact: form.managerContact,
-      coordinatorId: userId,
-    });
+    setLoading(true);
 
-    toast.success('Shelter registered successfully!');
-    onComplete();
+    try {
+      // Use upsert to insert if doesn't exist, update if it does
+      const { data, error } = await supabase
+        .from('managers')
+        .upsert({
+          id: userId,
+          manager_name: profileForm.manager_name,
+          contact: profileForm.contact,
+          city: profileForm.city,
+          state: profileForm.state,
+          pincode: profileForm.pincode,
+          latitude: parseFloat(profileForm.latitude),
+          longitude: parseFloat(profileForm.longitude),
+        }, {
+          onConflict: 'id',
+          ignoreDuplicates: false
+        })
+        .select();
+
+      if (error) {
+        console.error('Profile save error:', error);
+        throw error;
+      }
+
+      console.log('Profile saved successfully:', data);
+      toast.success('Profile completed successfully!');
+      setStep('shelter');
+    } catch (err: any) {
+      console.error('Error updating profile:', err);
+      toast.error(err.message || 'Failed to save profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleShelterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const { error } = await supabase
+        .from('shelters')
+        .insert({
+          name: shelterForm.name,
+          address: shelterForm.address,
+          city: shelterForm.city,
+          state: shelterForm.state,
+          pincode: shelterForm.pincode,
+          latitude: parseFloat(shelterForm.latitude),
+          longitude: parseFloat(shelterForm.longitude),
+          capacity: parseInt(shelterForm.capacity),
+          current_occupancy: 0,
+          contact: shelterForm.contact,
+          manager_id: userId,
+        });
+
+      if (error) throw error;
+
+      toast.success('Shelter registered successfully!');
+      onComplete();
+    } catch (err: any) {
+      console.error('Error creating shelter:', err);
+      toast.error(err.message || 'Failed to register shelter');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -402,7 +546,9 @@ function ShelterSetup({
             </div>
             <div>
               <h1 className="font-bold text-foreground">FloodRelief</h1>
-              <p className="text-xs text-muted-foreground">Shelter Setup</p>
+              <p className="text-xs text-muted-foreground">
+                {step === 'profile' ? 'Profile Setup' : 'Shelter Setup'}
+              </p>
             </div>
           </div>
           <Button variant="ghost" size="sm" onClick={onLogout}>
@@ -413,144 +559,246 @@ function ShelterSetup({
       </header>
 
       <main className="container mx-auto px-4 py-8 max-w-2xl">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-2">Register Your Shelter</h1>
-          <p className="text-muted-foreground">
-            Set up your shelter to start managing relief operations
-          </p>
-        </div>
+        {step === 'profile' ? (
+          <>
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold mb-2">Complete Your Profile</h1>
+              <p className="text-muted-foreground">
+                Set up your coordinator profile to start managing relief operations
+              </p>
+            </div>
 
-        <Card variant="elevated">
-          <CardContent className="pt-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <Label>Shelter Name *</Label>
-                <Input
-                  placeholder="e.g., Central Relief Camp"
-                  value={form.name}
-                  onChange={(e) => setForm(prev => ({ ...prev, name: e.target.value }))}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Address *</Label>
-                <Input
-                  placeholder="Street address"
-                  value={form.address}
-                  onChange={(e) => setForm(prev => ({ ...prev, address: e.target.value }))}
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>City *</Label>
-                  <Input
-                    placeholder="City"
-                    value={form.city}
-                    onChange={(e) => setForm(prev => ({ ...prev, city: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>State *</Label>
-                  <Input
-                    placeholder="State"
-                    value={form.state}
-                    onChange={(e) => setForm(prev => ({ ...prev, state: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Pincode *</Label>
-                  <Input
-                    placeholder="Pincode"
-                    value={form.pincode}
-                    onChange={(e) => setForm(prev => ({ ...prev, pincode: e.target.value }))}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Latitude *</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    placeholder="e.g., 19.0760"
-                    value={form.latitude}
-                    onChange={(e) => setForm(prev => ({ ...prev, latitude: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Longitude *</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    placeholder="e.g., 72.8777"
-                    value={form.longitude}
-                    onChange={(e) => setForm(prev => ({ ...prev, longitude: e.target.value }))}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Total Capacity *</Label>
-                  <Input
-                    type="number"
-                    placeholder="e.g., 500"
-                    value={form.totalCapacity}
-                    onChange={(e) => setForm(prev => ({ ...prev, totalCapacity: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Contact Number *</Label>
-                  <Input
-                    placeholder="+91 9876543210"
-                    value={form.contactNumber}
-                    onChange={(e) => setForm(prev => ({ ...prev, contactNumber: e.target.value }))}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="border-t pt-6">
-                <h3 className="font-semibold mb-4">Shelter Manager Details</h3>
-                <div className="grid grid-cols-2 gap-4">
+            <Card variant="elevated">
+              <CardContent className="pt-6">
+                <form onSubmit={handleProfileSubmit} className="space-y-6">
                   <div className="space-y-2">
                     <Label>Manager Name *</Label>
                     <Input
-                      placeholder="Full name"
-                      value={form.managerName}
-                      onChange={(e) => setForm(prev => ({ ...prev, managerName: e.target.value }))}
+                      placeholder="Your full name"
+                      value={profileForm.manager_name}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, manager_name: e.target.value }))}
                       required
                     />
                   </div>
+
                   <div className="space-y-2">
-                    <Label>Manager Contact *</Label>
+                    <Label>Contact Number *</Label>
                     <Input
                       placeholder="+91 9876543210"
-                      value={form.managerContact}
-                      onChange={(e) => setForm(prev => ({ ...prev, managerContact: e.target.value }))}
+                      value={profileForm.contact}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, contact: e.target.value }))}
                       required
                     />
                   </div>
-                </div>
-              </div>
 
-              <Button type="submit" variant="hero" className="w-full" size="lg">
-                <Building2 className="w-4 h-4 mr-2" />
-                Register Shelter
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>City *</Label>
+                      <Input
+                        placeholder="City"
+                        value={profileForm.city}
+                        onChange={(e) => setProfileForm(prev => ({ ...prev, city: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>State *</Label>
+                      <Input
+                        placeholder="State"
+                        value={profileForm.state}
+                        onChange={(e) => setProfileForm(prev => ({ ...prev, state: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Pincode *</Label>
+                      <Input
+                        placeholder="Pincode"
+                        value={profileForm.pincode}
+                        onChange={(e) => setProfileForm(prev => ({ ...prev, pincode: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Latitude *</Label>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 19.0760"
+                        value={profileForm.latitude}
+                        onChange={(e) => setProfileForm(prev => ({ ...prev, latitude: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Longitude *</Label>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 72.8777"
+                        value={profileForm.longitude}
+                        onChange={(e) => setProfileForm(prev => ({ ...prev, longitude: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <Button 
+                    type="submit" 
+                    variant="hero" 
+                    className="w-full" 
+                    size="lg"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      'Continue to Shelter Setup'
+                    )}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          <>
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold mb-2">Register Your Shelter</h1>
+              <p className="text-muted-foreground">
+                Set up your shelter to start managing relief operations
+              </p>
+            </div>
+
+            <Card variant="elevated">
+              <CardContent className="pt-6">
+                <form onSubmit={handleShelterSubmit} className="space-y-6">
+                  <div className="space-y-2">
+                    <Label>Shelter Name *</Label>
+                    <Input
+                      placeholder="e.g., Central Relief Camp"
+                      value={shelterForm.name}
+                      onChange={(e) => setShelterForm(prev => ({ ...prev, name: e.target.value }))}
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Address *</Label>
+                    <Input
+                      placeholder="Street address"
+                      value={shelterForm.address}
+                      onChange={(e) => setShelterForm(prev => ({ ...prev, address: e.target.value }))}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>City *</Label>
+                      <Input
+                        placeholder="City"
+                        value={shelterForm.city}
+                        onChange={(e) => setShelterForm(prev => ({ ...prev, city: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>State *</Label>
+                      <Input
+                        placeholder="State"
+                        value={shelterForm.state}
+                        onChange={(e) => setShelterForm(prev => ({ ...prev, state: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Pincode *</Label>
+                      <Input
+                        placeholder="Pincode"
+                        value={shelterForm.pincode}
+                        onChange={(e) => setShelterForm(prev => ({ ...prev, pincode: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Latitude *</Label>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 19.0760"
+                        value={shelterForm.latitude}
+                        onChange={(e) => setShelterForm(prev => ({ ...prev, latitude: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Longitude *</Label>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 72.8777"
+                        value={shelterForm.longitude}
+                        onChange={(e) => setShelterForm(prev => ({ ...prev, longitude: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Total Capacity *</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g., 500"
+                        value={shelterForm.capacity}
+                        onChange={(e) => setShelterForm(prev => ({ ...prev, capacity: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Contact Number *</Label>
+                      <Input
+                        placeholder="+91 9876543210"
+                        value={shelterForm.contact}
+                        onChange={(e) => setShelterForm(prev => ({ ...prev, contact: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <Button 
+                    type="submit" 
+                    variant="hero" 
+                    className="w-full" 
+                    size="lg"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Registering...
+                      </>
+                    ) : (
+                      <>
+                        <Building2 className="w-4 h-4 mr-2" />
+                        Register Shelter
+                      </>
+                    )}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </main>
     </div>
   );
@@ -559,36 +807,49 @@ function ShelterSetup({
 function ResourcesSection({ 
   resources, 
   shelterId,
-  addResource,
-  updateResource
+  onResourcesChange
 }: { 
   resources: Resource[];
-  shelterId: string;
-  addResource: (r: any) => any;
-  updateResource: (id: string, data: any) => void;
+  shelterId: number;
+  onResourcesChange: () => void;
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [newResource, setNewResource] = useState({
-    type: '' as Resource['type'] | '',
-    quantityAvailable: '',
-    quantityNeeded: '',
-    unit: '',
+    type: '' as ResourceType | '',
+    quantity: '',
+    needed: '',
   });
 
-  const handleAddResource = () => {
-    if (!newResource.type) return;
+  const handleAddResource = async () => {
+    if (!newResource.type) {
+      toast.error('Please select a resource type');
+      return;
+    }
     
-    addResource({
-      shelterId,
-      type: newResource.type,
-      quantityAvailable: parseInt(newResource.quantityAvailable) || 0,
-      quantityNeeded: parseInt(newResource.quantityNeeded) || 0,
-      unit: newResource.unit,
-    });
-    
-    setNewResource({ type: '', quantityAvailable: '', quantityNeeded: '', unit: '' });
-    setShowAddForm(false);
-    toast.success('Resource added!');
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('resources')
+        .insert({
+          shelter_id: shelterId,
+          type: newResource.type,
+          quantity: parseInt(newResource.quantity) || 0,
+          needed: parseInt(newResource.needed) || 0,
+        });
+
+      if (error) throw error;
+      
+      setNewResource({ type: '', quantity: '', needed: '' });
+      setShowAddForm(false);
+      toast.success('Resource added!');
+      onResourcesChange();
+    } catch (err: any) {
+      console.error('Error adding resource:', err);
+      toast.error(err.message || 'Failed to add resource');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -604,49 +865,49 @@ function ResourcesSection({
       {showAddForm && (
         <Card className="animate-scale-in">
           <CardContent className="pt-6">
-            <div className="grid md:grid-cols-5 gap-4">
+            <div className="grid md:grid-cols-4 gap-4">
               <div>
                 <Label>Type</Label>
                 <Select 
                   value={newResource.type}
-                  onValueChange={(v: Resource['type']) => setNewResource(prev => ({ ...prev, type: v }))}
+                  onValueChange={(v: ResourceType) => setNewResource(prev => ({ ...prev, type: v }))}
                 >
                   <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                   <SelectContent>
                     {RESOURCE_TYPES.map(t => (
-                      <SelectItem key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</SelectItem>
+                      <SelectItem key={t} value={t}>
+                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>Available</Label>
+                <Label>Available Quantity</Label>
                 <Input
                   type="number"
                   placeholder="0"
-                  value={newResource.quantityAvailable}
-                  onChange={(e) => setNewResource(prev => ({ ...prev, quantityAvailable: e.target.value }))}
+                  value={newResource.quantity}
+                  onChange={(e) => setNewResource(prev => ({ ...prev, quantity: e.target.value }))}
                 />
               </div>
               <div>
-                <Label>Needed</Label>
+                <Label>Needed Quantity</Label>
                 <Input
                   type="number"
                   placeholder="0"
-                  value={newResource.quantityNeeded}
-                  onChange={(e) => setNewResource(prev => ({ ...prev, quantityNeeded: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label>Unit</Label>
-                <Input
-                  placeholder="kg, liters..."
-                  value={newResource.unit}
-                  onChange={(e) => setNewResource(prev => ({ ...prev, unit: e.target.value }))}
+                  value={newResource.needed}
+                  onChange={(e) => setNewResource(prev => ({ ...prev, needed: e.target.value }))}
                 />
               </div>
               <div className="flex items-end">
-                <Button onClick={handleAddResource} className="w-full">Add</Button>
+                <Button 
+                  onClick={handleAddResource} 
+                  className="w-full"
+                  disabled={loading}
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add'}
+                </Button>
               </div>
             </div>
           </CardContent>
@@ -662,24 +923,26 @@ function ResourcesSection({
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {resources.map(resource => (
-            <Card key={resource.id} variant="elevated">
+            <Card key={resource.resource_id} variant="elevated">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-4">
                   <Badge variant="secondary" className="capitalize">{resource.type}</Badge>
-                  <span className="text-xs text-muted-foreground">{resource.unit}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(resource.last_updated).toLocaleDateString()}
+                  </span>
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span className="text-sm">Available</span>
-                    <span className="font-semibold">{resource.quantityAvailable}</span>
+                    <span className="font-semibold">{resource.quantity}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm">Needed</span>
-                    <span className="font-semibold">{resource.quantityNeeded}</span>
+                    <span className="font-semibold">{resource.needed}</span>
                   </div>
                   <Progress 
-                    value={resource.quantityNeeded > 0 
-                      ? (resource.quantityAvailable / resource.quantityNeeded) * 100 
+                    value={resource.needed > 0 
+                      ? (resource.quantity / resource.needed) * 100 
                       : 100
                     } 
                     className="h-2"
@@ -698,60 +961,60 @@ function TasksSection({
   tasks, 
   shelterId,
   shelterName,
-  addTask,
-  runAIAssignment
+  onTasksChange
 }: { 
   tasks: Task[];
-  shelterId: string;
+  shelterId: number;
   shelterName: string;
-  addTask: (t: any) => Task;
-  runAIAssignment: (id: string) => void;
+  onTasksChange: () => void;
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
-    priority: 'medium' as TaskPriority,
-    requiredSkills: [] as VolunteerSkill[],
+    priority: 'Medium' as TaskPriority,
+    volunteers_required: '1',
   });
 
-  const toggleSkill = (skill: VolunteerSkill) => {
-    setNewTask(prev => ({
-      ...prev,
-      requiredSkills: prev.requiredSkills.includes(skill)
-        ? prev.requiredSkills.filter(s => s !== skill)
-        : [...prev.requiredSkills, skill],
-    }));
-  };
-
-  const handleCreateTask = () => {
+  const handleCreateTask = async () => {
     if (!newTask.title || !newTask.description) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    const task = addTask({
-      title: newTask.title,
-      description: newTask.description,
-      priority: newTask.priority,
-      status: 'created',
-      shelterId,
-      shelterName,
-      requiredSkills: newTask.requiredSkills,
-    });
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .insert({
+          shelter_id: shelterId,
+          title: newTask.title,
+          description: newTask.description,
+          priority: newTask.priority,
+          status: 'Created',
+          volunteers_required: parseInt(newTask.volunteers_required),
+        });
 
-    // Run AI assignment
-    runAIAssignment(task.id);
-    
-    setNewTask({ title: '', description: '', priority: 'medium', requiredSkills: [] });
-    setShowCreateForm(false);
-    toast.success('Task created and AI assignment triggered!');
+      if (error) throw error;
+      
+      setNewTask({ title: '', description: '', priority: 'Medium', volunteers_required: '1' });
+      setShowCreateForm(false);
+      toast.success('Task created successfully!');
+      onTasksChange();
+    } catch (err: any) {
+      console.error('Error creating task:', err);
+      toast.error(err.message || 'Failed to create task');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
-      case 'high': return <AlertTriangle className="w-3 h-3" />;
-      case 'medium': return <Minus className="w-3 h-3" />;
+      case 'High': return <AlertTriangle className="w-3 h-3" />;
+      case 'Medium': return <Minus className="w-3 h-3" />;
+      case 'Low': return <Clock className="w-3 h-3" />;
       default: return <Clock className="w-3 h-3" />;
     }
   };
@@ -770,7 +1033,7 @@ function TasksSection({
         <Card variant="elevated" className="animate-scale-in">
           <CardHeader>
             <CardTitle>Create New Task</CardTitle>
-            <CardDescription>Tasks will be automatically assigned to volunteers by AI</CardDescription>
+            <CardDescription>Create tasks for volunteers to complete</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -783,50 +1046,59 @@ function TasksSection({
             </div>
 
             <div className="space-y-2">
-              <Label>Task Description * (Detailed instructions)</Label>
+              <Label>Task Description *</Label>
               <Textarea
-                placeholder="Provide detailed instructions, safety notes, timing, location details..."
+                placeholder="Provide detailed instructions..."
                 rows={6}
                 value={newTask.description}
                 onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <Select 
-                value={newTask.priority}
-                onValueChange={(v: TaskPriority) => setNewTask(prev => ({ ...prev, priority: v }))}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="high">High Priority</SelectItem>
-                  <SelectItem value="medium">Medium Priority</SelectItem>
-                  <SelectItem value="low">Low Priority</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <Select 
+                  value={newTask.priority}
+                  onValueChange={(v: TaskPriority) => setNewTask(prev => ({ ...prev, priority: v }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="High">High Priority</SelectItem>
+                    <SelectItem value="Medium">Medium Priority</SelectItem>
+                    <SelectItem value="Low">Low Priority</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="space-y-2">
-              <Label>Required Skills</Label>
-              <div className="flex flex-wrap gap-2">
-                {SKILLS.map(skill => (
-                  <Badge
-                    key={skill.value}
-                    variant={newTask.requiredSkills.includes(skill.value) ? 'default' : 'outline'}
-                    className="cursor-pointer"
-                    onClick={() => toggleSkill(skill.value)}
-                  >
-                    {skill.label}
-                  </Badge>
-                ))}
+              <div className="space-y-2">
+                <Label>Volunteers Required</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={newTask.volunteers_required}
+                  onChange={(e) => setNewTask(prev => ({ ...prev, volunteers_required: e.target.value }))}
+                />
               </div>
             </div>
 
             <div className="flex gap-2">
-              <Button onClick={handleCreateTask} variant="hero">
-                <Bot className="w-4 h-4 mr-2" />
-                Create & Auto-Assign
+              <Button 
+                onClick={handleCreateTask} 
+                variant="hero"
+                disabled={loading}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Task
+                  </>
+                )}
               </Button>
               <Button variant="outline" onClick={() => setShowCreateForm(false)}>
                 Cancel
@@ -845,52 +1117,46 @@ function TasksSection({
       ) : (
         <div className="space-y-4">
           {tasks.map(task => (
-            <Card key={task.id} variant="elevated">
+            <Card key={task.task_id} variant="elevated">
               <CardContent className="pt-6">
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <Badge variant={task.priority === 'high' ? 'priority_high' : task.priority === 'medium' ? 'priority_medium' : 'priority_low'}>
+                      <Badge 
+                        variant={
+                          task.priority === 'High' ? 'priority_high' : 
+                          task.priority === 'Medium' ? 'priority_medium' : 
+                          'priority_low'
+                        }
+                      >
                         {getPriorityIcon(task.priority)}
-                        <span className="ml-1 capitalize">{task.priority}</span>
+                        <span className="ml-1">{task.priority}</span>
                       </Badge>
-                      <Badge variant={task.status === 'completed' ? 'status_completed' : task.status === 'assigned' || task.status === 'accepted' ? 'status_assigned' : 'status_pending'}>
-                        {task.status.charAt(0).toUpperCase() + task.status.slice(1)}
+                      <Badge 
+                        variant={
+                          task.status === 'Completed' ? 'status_completed' : 
+                          task.status === 'Assigned' ? 'status_assigned' : 
+                          'status_pending'
+                        }
+                      >
+                        {task.status}
                       </Badge>
-                      {task.aiAssigned && (
-                        <Badge variant="ai">
-                          <Bot className="w-3 h-3 mr-1" />
-                          AI Assigned
-                        </Badge>
-                      )}
+                      <Badge variant="outline">
+                        <Users className="w-3 h-3 mr-1" />
+                        {task.volunteers_required} required
+                      </Badge>
                     </div>
                     
-                    <h3 className="text-lg font-semibold">{task.title}</h3>
-                    
-                    {task.assignedVolunteerName && (
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Assigned to: <span className="font-medium">{task.assignedVolunteerName}</span>
-                      </p>
-                    )}
+                    <h3 className="text-lg font-semibold mb-2">{task.title}</h3>
 
                     <ScrollArea className="h-20 mt-3 rounded-lg bg-muted/50 p-3">
                       <p className="text-sm">{task.description}</p>
                     </ScrollArea>
-                  </div>
 
-                  {task.status === 'created' && (
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => {
-                        runAIAssignment(task.id);
-                        toast.info('Re-running AI assignment...');
-                      }}
-                    >
-                      <RefreshCw className="w-4 h-4 mr-1" />
-                      Re-assign
-                    </Button>
-                  )}
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Created: {new Date(task.created_at).toLocaleString()}
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
