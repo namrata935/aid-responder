@@ -441,6 +441,7 @@ function ShelterSetup({
     return 'profile';
   });
   const [loading, setLoading] = useState(false);
+  const [detectingLocation, setDetectingLocation] = useState(false);
   
   const [profileForm, setProfileForm] = useState({
     manager_name: profile?.manager_name || '',
@@ -463,6 +464,57 @@ function ShelterSetup({
     capacity: '',
     contact: '',
   });
+
+  const handleDetectLocation = (isProfile: boolean) => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported by your browser');
+      return;
+    }
+
+    setDetectingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        if (isProfile) {
+          setProfileForm(prev => ({
+            ...prev,
+            latitude: latitude.toFixed(6),
+            longitude: longitude.toFixed(6),
+          }));
+        } else {
+          setShelterForm(prev => ({
+            ...prev,
+            latitude: latitude.toFixed(6),
+            longitude: longitude.toFixed(6),
+          }));
+        }
+        toast.success('Location detected successfully!');
+        setDetectingLocation(false);
+      },
+      (error) => {
+        console.error('Geolocation error:', error);
+        let errorMessage = 'Failed to detect location';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'Location access denied. Please enable location permissions.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'Location information unavailable.';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'Location request timed out.';
+            break;
+        }
+        toast.error(errorMessage);
+        setDetectingLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  };
 
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -621,28 +673,52 @@ function ShelterSetup({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Latitude *</Label>
-                      <Input
-                        type="number"
-                        step="any"
-                        placeholder="e.g., 19.0760"
-                        value={profileForm.latitude}
-                        onChange={(e) => setProfileForm(prev => ({ ...prev, latitude: e.target.value }))}
-                        required
-                      />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Coordinates *</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDetectLocation(true)}
+                        disabled={detectingLocation}
+                      >
+                        {detectingLocation ? (
+                          <>
+                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                            Detecting...
+                          </>
+                        ) : (
+                          <>
+                            <MapPin className="w-3 h-3 mr-2" />
+                            Detect Location
+                          </>
+                        )}
+                      </Button>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Longitude *</Label>
-                      <Input
-                        type="number"
-                        step="any"
-                        placeholder="e.g., 72.8777"
-                        value={profileForm.longitude}
-                        onChange={(e) => setProfileForm(prev => ({ ...prev, longitude: e.target.value }))}
-                        required
-                      />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Latitude *</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          placeholder="e.g., 19.0760"
+                          value={profileForm.latitude}
+                          onChange={(e) => setProfileForm(prev => ({ ...prev, latitude: e.target.value }))}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Longitude *</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          placeholder="e.g., 72.8777"
+                          value={profileForm.longitude}
+                          onChange={(e) => setProfileForm(prev => ({ ...prev, longitude: e.target.value }))}
+                          required
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -728,28 +804,52 @@ function ShelterSetup({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Latitude *</Label>
-                      <Input
-                        type="number"
-                        step="any"
-                        placeholder="e.g., 19.0760"
-                        value={shelterForm.latitude}
-                        onChange={(e) => setShelterForm(prev => ({ ...prev, latitude: e.target.value }))}
-                        required
-                      />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Coordinates *</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDetectLocation(false)}
+                        disabled={detectingLocation}
+                      >
+                        {detectingLocation ? (
+                          <>
+                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                            Detecting...
+                          </>
+                        ) : (
+                          <>
+                            <MapPin className="w-3 h-3 mr-2" />
+                            Detect Location
+                          </>
+                        )}
+                      </Button>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Longitude *</Label>
-                      <Input
-                        type="number"
-                        step="any"
-                        placeholder="e.g., 72.8777"
-                        value={shelterForm.longitude}
-                        onChange={(e) => setShelterForm(prev => ({ ...prev, longitude: e.target.value }))}
-                        required
-                      />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Latitude *</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          placeholder="e.g., 19.0760"
+                          value={shelterForm.latitude}
+                          onChange={(e) => setShelterForm(prev => ({ ...prev, latitude: e.target.value }))}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Longitude *</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          placeholder="e.g., 72.8777"
+                          value={shelterForm.longitude}
+                          onChange={(e) => setShelterForm(prev => ({ ...prev, longitude: e.target.value }))}
+                          required
+                        />
+                      </div>
                     </div>
                   </div>
 

@@ -24,10 +24,11 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Shelter } from '@/types';
+import { supabase } from '@/lib/supabase';
 
 export default function VictimDashboard() {
   const { user, logout } = useAuth();
-  const { registerVictim, getShelterById } = useData();
+  const { getShelterById, findNearestAvailableShelter } = useData();
   const navigate = useNavigate();
   
   const [isRegistered, setIsRegistered] = useState(false);
@@ -46,8 +47,73 @@ export default function VictimDashboard() {
   React.useEffect(() => {
     if (!user || user.role !== 'Victim') {
       navigate('/auth');
+    } else {
+      // Check if victim is already registered
+      checkExistingRegistration();
     }
   }, [user, navigate]);
+
+  const checkExistingRegistration = async () => {
+    if (!user) return;
+    
+    try {
+      const { data: victimData, error } = await supabase
+        .from('victims')
+        .select('*, shelters(*)')
+        .eq('id', user.id)
+        .single();
+
+      if (error) {
+        // No registration found, that's okay
+        if (error.code === 'PGRST116') return;
+        console.error('Error checking registration:', error);
+        return;
+      }
+
+      // If victim has valid data (not just placeholder), show their assigned shelter
+      if (victimData && victimData.name && victimData.shelter_id && victimData.shelters) {
+        const shelter: Shelter = {
+          id: victimData.shelters.id,
+          name: victimData.shelters.name,
+          address: victimData.shelters.address,
+          city: victimData.shelters.city,
+          state: victimData.shelters.state,
+          pincode: victimData.shelters.pincode,
+          location: {
+            latitude: parseFloat(victimData.shelters.latitude),
+            longitude: parseFloat(victimData.shelters.longitude),
+          },
+          totalCapacity: victimData.shelters.capacity,
+          currentOccupancy: victimData.shelters.current_occupancy,
+          contactNumber: victimData.shelters.contact_number,
+          managerName: victimData.shelters.manager_name,
+          managerContact: victimData.shelters.manager_contact,
+          coordinatorId: victimData.shelters.coordinator_id,
+          createdAt: new Date(victimData.shelters.created_at),
+        };
+
+        // Calculate distance
+        const victimLocation = {
+          latitude: parseFloat(victimData.latitude),
+          longitude: parseFloat(victimData.longitude),
+        };
+        
+        const R = 6371;
+        const dLat = (shelter.location.latitude - victimLocation.latitude) * Math.PI / 180;
+        const dLon = (shelter.location.longitude - victimLocation.longitude) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(victimLocation.latitude * Math.PI / 180) * Math.cos(shelter.location.latitude * Math.PI / 180) *
+          Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = Math.round((R * c) * 10) / 10;
+
+        setAssignedShelter({ shelter, distance });
+        setIsRegistered(true);
+      }
+    } catch (err) {
+      console.error('Error checking existing registration:', err);
+    }
+  };
 
   const handleUseMyLocation = () => {
     if (navigator.geolocation) {
@@ -79,50 +145,89 @@ export default function VictimDashboard() {
       return;
     }
 
+    if (!user) {
+      toast.error('User not found');
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const result = registerVictim({
-        visitorId: user?.id || '',
+      const victimLocation = {
+        latitude: parseFloat(formData.latitude),
+        longitude: parseFloat(formData.longitude),
+      };
+
+      console.log('🔍 Victim Location:', victimLocation);
+
+      // Find nearest available shelter
+      const result = await findNearestAvailableShelter(victimLocation);
+
+      console.log('🏠 Nearest Shelter Result:', result);
+
+      // Prepare victim data
+      const victimDataToInsert = {
+        id: user.id,
         name: formData.name,
         age: parseInt(formData.age),
         gender: formData.gender,
-        medicalCondition: formData.medicalCondition || undefined,
-        location: {
-          latitude: parseFloat(formData.latitude),
-          longitude: parseFloat(formData.longitude),
-        },
-      });
+        latitude: formData.latitude,
+        longitude: formData.longitude,
+        medical_condition: formData.medicalCondition || null,
+        shelter_id: result?.shelter.id || null, // Will be null if no shelter found
+      };
 
-      if (result.shelter) {
+      console.log('💾 Inserting victim data:', victimDataToInsert);
+
+      // Insert or update victim into Supabase
+      const { data: victimData, error: victimError } = await supabase
+        .from('victims')
+        .insert(victimDataToInsert)
+        .select()
+        .single();
+
+      if (victimError) {
+        // If victim already exists, update instead
+        if (victimError.code === '23505') {
+          const { error: updateError } = await supabase
+            .from('victims')
+            .update(victimDataToInsert)
+            .eq('id', user.id);
+          
+          if (updateError) throw updateError;
+        } else {
+          throw victimError;
+        }
+      }
+
+      // If a shelter was found, update its occupancy
+      if (result) {
+        const { error: shelterError } = await supabase
+          .from('shelters')
+          .update({ 
+            current_occupancy: result.shelter.currentOccupancy + 1 
+          })
+          .eq('id', result.shelter.id);
+
+        if (shelterError) throw shelterError;
+
+        // Set assigned shelter for display
         setAssignedShelter({
           shelter: result.shelter,
-          distance: Math.round(
-            calculateDistance(
-              { latitude: parseFloat(formData.latitude), longitude: parseFloat(formData.longitude) },
-              result.shelter.location
-            ) * 10
-          ) / 10,
+          distance: result.distance,
         });
         setIsRegistered(true);
         toast.success('You have been assigned to a shelter!');
       } else {
-        toast.error('No available shelters found. Please try again later.');
+        // No shelter available, but victim is registered
+        toast.warning('You have been registered, but no shelters are currently available. We will contact you when space becomes available.');
+        setIsRegistered(false); // Keep them on the form page but show a message
       }
-    } catch (error) {
-      toast.error('Registration failed. Please try again.');
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      toast.error(error.message || 'Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const calculateDistance = (loc1: { latitude: number; longitude: number }, loc2: { latitude: number; longitude: number }) => {
-    const R = 6371;
-    const dLat = (loc2.latitude - loc1.latitude) * Math.PI / 180;
-    const dLon = (loc2.longitude - loc1.longitude) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(loc1.latitude * Math.PI / 180) * Math.cos(loc2.latitude * Math.PI / 180) *
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
   };
 
   const handleLogout = () => {

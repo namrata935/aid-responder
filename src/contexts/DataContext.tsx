@@ -1,65 +1,21 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Shelter, Victim, Volunteer, Task, Resource, Donation, VolunteerSkill } from '@/types';
+import { supabase } from '@/lib/supabase';
 
-// Mock initial data
-const initialShelters: Shelter[] = [
+// Mock initial data (kept for volunteers, tasks, resources, donations)
+const initialVolunteers: Volunteer[] = [
   {
-    id: '1',
-    name: 'Central Relief Camp',
-    address: '123 Main Street',
+    id: 'vol1',
+    userId: 'user1',
+    name: 'Raj Kumar',
+    contactNumber: '+91 9876543100',
     city: 'Mumbai',
-    state: 'Maharashtra',
-    pincode: '400001',
-    location: { latitude: 19.0760, longitude: 72.8777 },
-    totalCapacity: 500,
-    currentOccupancy: 320,
-    contactNumber: '+91 9876543210',
-    managerName: 'Rahul Sharma',
-    managerContact: '+91 9876543211',
-    coordinatorId: 'coord1',
+    skills: ['first_aid', 'driving', 'logistics'],
+    availability: 'available',
+    location: { latitude: 19.0728, longitude: 72.8826 },
+    profileCompleted: true,
     createdAt: new Date(),
   },
-  {
-    id: '2',
-    name: 'East Zone Shelter',
-    address: '456 Park Avenue',
-    city: 'Mumbai',
-    state: 'Maharashtra',
-    pincode: '400051',
-    location: { latitude: 19.0596, longitude: 72.8295 },
-    totalCapacity: 300,
-    currentOccupancy: 150,
-    contactNumber: '+91 9876543220',
-    managerName: 'Priya Patel',
-    managerContact: '+91 9876543221',
-    coordinatorId: 'coord2',
-    createdAt: new Date(),
-  },
-  {
-    id: '3',
-    name: 'North Community Center',
-    address: '789 Hill Road',
-    city: 'Mumbai',
-    state: 'Maharashtra',
-    pincode: '400080',
-    location: { latitude: 19.1136, longitude: 72.8697 },
-    totalCapacity: 400,
-    currentOccupancy: 398,
-    contactNumber: '+91 9876543230',
-    managerName: 'Amit Kumar',
-    managerContact: '+91 9876543231',
-    coordinatorId: 'coord3',
-    createdAt: new Date(),
-  },
-];
-
-const initialResources: Resource[] = [
-  { id: '1', shelterId: '1', type: 'food', quantityAvailable: 500, quantityNeeded: 1000, unit: 'kg', lastUpdated: new Date() },
-  { id: '2', shelterId: '1', type: 'water', quantityAvailable: 2000, quantityNeeded: 3000, unit: 'liters', lastUpdated: new Date() },
-  { id: '3', shelterId: '1', type: 'medicine', quantityAvailable: 100, quantityNeeded: 200, unit: 'kits', lastUpdated: new Date() },
-  { id: '4', shelterId: '1', type: 'blankets', quantityAvailable: 300, quantityNeeded: 500, unit: 'pieces', lastUpdated: new Date() },
-  { id: '5', shelterId: '2', type: 'food', quantityAvailable: 300, quantityNeeded: 600, unit: 'kg', lastUpdated: new Date() },
-  { id: '6', shelterId: '2', type: 'water', quantityAvailable: 1500, quantityNeeded: 2000, unit: 'liters', lastUpdated: new Date() },
 ];
 
 const initialTasks: Task[] = [
@@ -93,19 +49,13 @@ const initialTasks: Task[] = [
   },
 ];
 
-const initialVolunteers: Volunteer[] = [
-  {
-    id: 'vol1',
-    userId: 'user1',
-    name: 'Raj Kumar',
-    contactNumber: '+91 9876543100',
-    city: 'Mumbai',
-    skills: ['first_aid', 'driving', 'logistics'],
-    availability: 'available',
-    location: { latitude: 19.0728, longitude: 72.8826 },
-    profileCompleted: true,
-    createdAt: new Date(),
-  },
+const initialResources: Resource[] = [
+  { id: '1', shelterId: '1', type: 'food', quantityAvailable: 500, quantityNeeded: 1000, unit: 'kg', lastUpdated: new Date() },
+  { id: '2', shelterId: '1', type: 'water', quantityAvailable: 2000, quantityNeeded: 3000, unit: 'liters', lastUpdated: new Date() },
+  { id: '3', shelterId: '1', type: 'medicine', quantityAvailable: 100, quantityNeeded: 200, unit: 'kits', lastUpdated: new Date() },
+  { id: '4', shelterId: '1', type: 'blankets', quantityAvailable: 300, quantityNeeded: 500, unit: 'pieces', lastUpdated: new Date() },
+  { id: '5', shelterId: '2', type: 'food', quantityAvailable: 300, quantityNeeded: 600, unit: 'kg', lastUpdated: new Date() },
+  { id: '6', shelterId: '2', type: 'water', quantityAvailable: 1500, quantityNeeded: 2000, unit: 'liters', lastUpdated: new Date() },
 ];
 
 interface DataContextType {
@@ -115,6 +65,7 @@ interface DataContextType {
   tasks: Task[];
   resources: Resource[];
   donations: Donation[];
+  loading: boolean;
   
   // Shelter operations
   addShelter: (shelter: Omit<Shelter, 'id' | 'createdAt'>) => Shelter;
@@ -148,7 +99,7 @@ interface DataContextType {
   
   // Utility
   getShelterById: (id: string) => Shelter | undefined;
-  findNearestAvailableShelter: (location: { latitude: number; longitude: number }) => { shelter: Shelter; distance: number } | null;
+  findNearestAvailableShelter: (location: { latitude: number; longitude: number }) => Promise<{ shelter: Shelter; distance: number } | null>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -165,12 +116,57 @@ function calculateDistance(loc1: { latitude: number; longitude: number }, loc2: 
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const [shelters, setShelters] = useState<Shelter[]>(initialShelters);
+  const [shelters, setShelters] = useState<Shelter[]>([]);
   const [victims, setVictims] = useState<Victim[]>([]);
   const [volunteers, setVolunteers] = useState<Volunteer[]>(initialVolunteers);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [resources, setResources] = useState<Resource[]>(initialResources);
   const [donations, setDonations] = useState<Donation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch shelters from Supabase on mount
+  useEffect(() => {
+    fetchShelters();
+  }, []);
+
+  const fetchShelters = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('shelters')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Transform database shelters to app format
+      const transformedShelters: Shelter[] = (data || []).map(shelter => ({
+        id: shelter.id,
+        name: shelter.name,
+        address: shelter.address,
+        city: shelter.city,
+        state: shelter.state,
+        pincode: shelter.pincode,
+        location: {
+          latitude: parseFloat(shelter.latitude),
+          longitude: parseFloat(shelter.longitude),
+        },
+        totalCapacity: shelter.capacity,
+        currentOccupancy: shelter.current_occupancy,
+        contactNumber: shelter.contact_number,
+        managerName: shelter.manager_name,
+        managerContact: shelter.manager_contact,
+        coordinatorId: shelter.coordinator_id,
+        createdAt: new Date(shelter.created_at),
+      }));
+
+      setShelters(transformedShelters);
+    } catch (error) {
+      console.error('Error fetching shelters:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const addShelter = (shelterData: Omit<Shelter, 'id' | 'createdAt'>) => {
     const newShelter: Shelter = {
@@ -186,43 +182,90 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setShelters(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
   };
 
-  const findNearestAvailableShelter = (location: { latitude: number; longitude: number }) => {
-    const availableShelters = shelters.filter(s => s.currentOccupancy < s.totalCapacity);
-    if (availableShelters.length === 0) return null;
+  const findNearestAvailableShelter = async (location: { latitude: number; longitude: number }) => {
+    console.log('🔍 Finding nearest shelter for location:', location);
+    
+    // Fetch latest shelters from database to ensure we have current occupancy
+    const { data, error } = await supabase
+      .from('shelters')
+      .select('*');
+
+    if (error) {
+      console.error('❌ Error fetching shelters:', error);
+      return null;
+    }
+
+    console.log('📊 Total shelters fetched from database:', data?.length || 0);
+    console.log('🏠 All shelters:', data);
+
+    // Transform and filter available shelters
+    const availableShelters: Shelter[] = (data || [])
+      .filter(s => {
+        const isAvailable = s.current_occupancy < s.capacity;
+        console.log(`🏠 ${s.name}: ${s.current_occupancy}/${s.capacity} - Available: ${isAvailable}`);
+        return isAvailable;
+      })
+      .map(shelter => ({
+        id: shelter.id,
+        name: shelter.name,
+        address: shelter.address,
+        city: shelter.city,
+        state: shelter.state,
+        pincode: shelter.pincode,
+        location: {
+          latitude: parseFloat(shelter.latitude),
+          longitude: parseFloat(shelter.longitude),
+        },
+        totalCapacity: shelter.capacity,
+        currentOccupancy: shelter.current_occupancy,
+        contactNumber: shelter.contact_number,
+        managerName: shelter.manager_name,
+        managerContact: shelter.manager_contact,
+        coordinatorId: shelter.coordinator_id,
+        createdAt: new Date(shelter.created_at),
+      }));
+
+    console.log('✅ Available shelters after filtering:', availableShelters.length);
+
+    if (availableShelters.length === 0) {
+      console.log('❌ No available shelters found');
+      return null;
+    }
 
     let nearest = availableShelters[0];
     let minDistance = calculateDistance(location, nearest.location);
 
+    console.log(`📍 Initial shelter: ${nearest.name}, Distance: ${minDistance.toFixed(2)} km`);
+
     for (const shelter of availableShelters) {
       const distance = calculateDistance(location, shelter.location);
+      console.log(`📍 Checking ${shelter.name}: Distance: ${distance.toFixed(2)} km`);
+      
       if (distance < minDistance) {
         minDistance = distance;
         nearest = shelter;
+        console.log(`✨ New nearest shelter: ${nearest.name} at ${minDistance.toFixed(2)} km`);
       }
     }
 
-    return { shelter: nearest, distance: Math.round(minDistance * 10) / 10 };
+    const result = { shelter: nearest, distance: Math.round(minDistance * 10) / 10 };
+    console.log('🎯 Final result:', result);
+    
+    return result;
   };
 
   const registerVictim = (victimData: Omit<Victim, 'id' | 'createdAt' | 'assignedShelterId'>) => {
-    const result = findNearestAvailableShelter(victimData.location);
-    
+    // Note: This function is kept for compatibility but the actual registration
+    // should happen in VictimDashboard using Supabase directly
     const newVictim: Victim = {
       ...victimData,
       id: crypto.randomUUID(),
       createdAt: new Date(),
-      assignedShelterId: result?.shelter.id,
+      assignedShelterId: undefined,
     };
 
     setVictims(prev => [...prev, newVictim]);
-
-    if (result) {
-      updateShelter(result.shelter.id, {
-        currentOccupancy: result.shelter.currentOccupancy + 1,
-      });
-    }
-
-    return { victim: newVictim, shelter: result?.shelter || null };
+    return { victim: newVictim, shelter: null };
   };
 
   const addVolunteer = (volunteerData: Omit<Volunteer, 'id' | 'createdAt'>) => {
@@ -356,6 +399,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       tasks,
       resources,
       donations,
+      loading,
       addShelter,
       updateShelter,
       registerVictim,
