@@ -24,7 +24,8 @@ import {
   Zap,
   Bot,
   AlertTriangle,
-  Minus
+  Minus,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Volunteer, VolunteerSkill, Task } from '@/types';
@@ -48,19 +49,17 @@ export default function VolunteerDashboard() {
   
   const volunteer = user ? getVolunteerByUserId(user.id) : undefined;
   const [activeTab, setActiveTab] = useState(volunteer?.profileCompleted ? 'tasks' : 'profile');
+  const [saving, setSaving] = useState(false);
   
   const [profileForm, setProfileForm] = useState({
     name: volunteer?.name || '',
     contactNumber: volunteer?.contactNumber || '',
-    city: volunteer?.city || '',
     skills: volunteer?.skills || [] as VolunteerSkill[],
     availability: volunteer?.availability || 'available' as 'available' | 'busy',
-    latitude: volunteer?.location?.latitude?.toString() || '',
-    longitude: volunteer?.location?.longitude?.toString() || '',
   });
 
   React.useEffect(() => {
-    if (!user || user.role !== 'volunteer') {
+    if (!user || user.role !== 'Volunteer') {
       navigate('/auth');
     }
   }, [user, navigate]);
@@ -69,7 +68,7 @@ export default function VolunteerDashboard() {
   const activeTasks = myTasks.filter(t => t.status !== 'completed' && t.status !== 'declined');
   const completedTasks = myTasks.filter(t => t.status === 'completed');
 
-  const handleProfileSubmit = (e: React.FormEvent) => {
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (profileForm.skills.length === 0) {
@@ -77,28 +76,32 @@ export default function VolunteerDashboard() {
       return;
     }
 
-    const volunteerData = {
-      userId: user?.id || '',
-      name: profileForm.name,
-      contactNumber: profileForm.contactNumber,
-      city: profileForm.city,
-      skills: profileForm.skills,
-      availability: profileForm.availability,
-      location: {
-        latitude: parseFloat(profileForm.latitude),
-        longitude: parseFloat(profileForm.longitude),
-      },
-      profileCompleted: true,
-    };
+    setSaving(true);
 
-    if (volunteer) {
-      updateVolunteer(volunteer.id, volunteerData);
-    } else {
-      addVolunteer(volunteerData);
+    try {
+      const volunteerData = {
+        userId: user?.id || '',
+        name: profileForm.name,
+        contactNumber: profileForm.contactNumber,
+        skills: profileForm.skills,
+        availability: profileForm.availability,
+        profileCompleted: true,
+      };
+
+      if (volunteer) {
+        await updateVolunteer(volunteer.id, volunteerData);
+      } else {
+        await addVolunteer(volunteerData);
+      }
+
+      toast.success('Profile saved successfully!');
+      setActiveTab('tasks');
+    } catch (error: any) {
+      console.error('Error saving profile:', error);
+      toast.error(error.message || 'Failed to save profile. Please try again.');
+    } finally {
+      setSaving(false);
     }
-
-    toast.success('Profile saved successfully!');
-    setActiveTab('tasks');
   };
 
   const toggleSkill = (skill: VolunteerSkill) => {
@@ -128,21 +131,7 @@ export default function VolunteerDashboard() {
     toast.success(messages[action]);
   };
 
-  const handleUseMyLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setProfileForm(prev => ({
-            ...prev,
-            latitude: position.coords.latitude.toString(),
-            longitude: position.coords.longitude.toString(),
-          }));
-          toast.success('Location detected!');
-        },
-        () => toast.error('Unable to get location')
-      );
-    }
-  };
+  
 
   const handleLogout = () => {
     logout();
@@ -242,6 +231,7 @@ export default function VolunteerDashboard() {
                         value={profileForm.name}
                         onChange={(e) => setProfileForm(prev => ({ ...prev, name: e.target.value }))}
                         required
+                        disabled={saving}
                       />
                     </div>
                     <div className="space-y-2">
@@ -252,21 +242,12 @@ export default function VolunteerDashboard() {
                         value={profileForm.contactNumber}
                         onChange={(e) => setProfileForm(prev => ({ ...prev, contactNumber: e.target.value }))}
                         required
+                        disabled={saving}
                       />
                     </div>
                   </div>
 
                   <div className="grid sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="city">City *</Label>
-                      <Input
-                        id="city"
-                        placeholder="Enter your city"
-                        value={profileForm.city}
-                        onChange={(e) => setProfileForm(prev => ({ ...prev, city: e.target.value }))}
-                        required
-                      />
-                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="availability">Availability *</Label>
                       <Select 
@@ -274,6 +255,7 @@ export default function VolunteerDashboard() {
                         onValueChange={(value: 'available' | 'busy') => 
                           setProfileForm(prev => ({ ...prev, availability: value }))
                         }
+                        disabled={saving}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -294,7 +276,7 @@ export default function VolunteerDashboard() {
                           key={skill.value}
                           variant={profileForm.skills.includes(skill.value) ? 'default' : 'outline'}
                           className="cursor-pointer transition-all hover:scale-105"
-                          onClick={() => toggleSkill(skill.value)}
+                          onClick={() => !saving && toggleSkill(skill.value)}
                         >
                           {skill.label}
                         </Badge>
@@ -302,44 +284,22 @@ export default function VolunteerDashboard() {
                     </div>
                   </div>
 
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Label>Location *</Label>
-                      <Button type="button" variant="outline" size="sm" onClick={handleUseMyLocation}>
-                        <MapPin className="w-4 h-4 mr-2" />
-                        Use My Location
-                      </Button>
-                    </div>
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="lat">Latitude</Label>
-                        <Input
-                          id="lat"
-                          type="number"
-                          step="any"
-                          placeholder="e.g., 19.0760"
-                          value={profileForm.latitude}
-                          onChange={(e) => setProfileForm(prev => ({ ...prev, latitude: e.target.value }))}
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="lng">Longitude</Label>
-                        <Input
-                          id="lng"
-                          type="number"
-                          step="any"
-                          placeholder="e.g., 72.8777"
-                          value={profileForm.longitude}
-                          onChange={(e) => setProfileForm(prev => ({ ...prev, longitude: e.target.value }))}
-                          required
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button type="submit" variant="hero" className="w-full" size="lg">
-                    {volunteer?.profileCompleted ? 'Update Profile' : 'Complete Profile'}
+                  
+                  <Button 
+                    type="submit" 
+                    variant="hero" 
+                    className="w-full" 
+                    size="lg"
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      volunteer?.profileCompleted ? 'Update Profile' : 'Complete Profile'
+                    )}
                   </Button>
                 </form>
               </CardContent>

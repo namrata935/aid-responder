@@ -60,22 +60,8 @@ export default function RoleSelectionPage() {
       await selectRole(role);
 
       // 2. Create role-specific entry
-      // Note: For Victims, the row will be created during actual registration in VictimDashboard
-      // This prevents creating placeholder rows with null values
-
-      if (role === 'Volunteer') {
-        const { error } = await supabase
-          .from('volunteers')
-          .insert({
-            id: user.id,
-            name: '',
-            contact: '',
-            skills: [],
-            availability: 'available'
-          });
-        
-        if (error && error.code !== '23505') throw error;
-      }
+      // Note: For Victims and Volunteers, the rows will be created during actual registration
+      // in their respective dashboards. This prevents creating placeholder rows with null values.
 
       if (role === 'Manager') {
         const { error } = await supabase

@@ -2,22 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { Shelter, Victim, Volunteer, Task, Resource, Donation, VolunteerSkill } from '@/types';
 import { supabase } from '@/lib/supabase';
 
-// Mock initial data (kept for volunteers, tasks, resources, donations)
-const initialVolunteers: Volunteer[] = [
-  {
-    id: 'vol1',
-    userId: 'user1',
-    name: 'Raj Kumar',
-    contactNumber: '+91 9876543100',
-    city: 'Mumbai',
-    skills: ['first_aid', 'driving', 'logistics'],
-    availability: 'available',
-    location: { latitude: 19.0728, longitude: 72.8826 },
-    profileCompleted: true,
-    createdAt: new Date(),
-  },
-];
-
+// Mock initial data (kept for tasks, resources, donations)
 const initialTasks: Task[] = [
   {
     id: '1',
@@ -75,8 +60,8 @@ interface DataContextType {
   registerVictim: (victim: Omit<Victim, 'id' | 'createdAt' | 'assignedShelterId'>) => { victim: Victim; shelter: Shelter | null };
   
   // Volunteer operations
-  addVolunteer: (volunteer: Omit<Volunteer, 'id' | 'createdAt'>) => Volunteer;
-  updateVolunteer: (id: string, data: Partial<Volunteer>) => void;
+  addVolunteer: (volunteer: Omit<Volunteer, 'id' | 'createdAt'>) => Promise<Volunteer>;
+  updateVolunteer: (id: string, data: Partial<Volunteer>) => Promise<void>;
   getVolunteerByUserId: (userId: string) => Volunteer | undefined;
   
   // Task operations
@@ -118,15 +103,16 @@ function calculateDistance(loc1: { latitude: number; longitude: number }, loc2: 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [shelters, setShelters] = useState<Shelter[]>([]);
   const [victims, setVictims] = useState<Victim[]>([]);
-  const [volunteers, setVolunteers] = useState<Volunteer[]>(initialVolunteers);
+  const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [resources, setResources] = useState<Resource[]>(initialResources);
   const [donations, setDonations] = useState<Donation[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch shelters from Supabase on mount
+  // Fetch shelters and volunteers from Supabase on mount
   useEffect(() => {
     fetchShelters();
+    fetchVolunteers();
   }, []);
 
   const fetchShelters = async () => {
@@ -165,6 +151,33 @@ export function DataProvider({ children }: { children: ReactNode }) {
       console.error('Error fetching shelters:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchVolunteers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('volunteers')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Transform database volunteers to app format
+      const transformedVolunteers: Volunteer[] = (data || []).map(volunteer => ({
+        id: volunteer.id,
+        userId: volunteer.id, // The volunteer id IS the user id (UUID from auth)
+        name: volunteer.name,
+        contactNumber: volunteer.contact,
+        skills: volunteer.skills || [],
+        availability: volunteer.availability || 'available',
+        profileCompleted: !!(volunteer.name && volunteer.contact && volunteer.skills?.length > 0),
+        createdAt: new Date(volunteer.created_at),
+      }));
+
+      setVolunteers(transformedVolunteers);
+    } catch (error) {
+      console.error('Error fetching volunteers:', error);
     }
   };
 
@@ -268,18 +281,73 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { victim: newVictim, shelter: null };
   };
 
-  const addVolunteer = (volunteerData: Omit<Volunteer, 'id' | 'createdAt'>) => {
-    const newVolunteer: Volunteer = {
-      ...volunteerData,
-      id: crypto.randomUUID(),
-      createdAt: new Date(),
-    };
-    setVolunteers(prev => [...prev, newVolunteer]);
-    return newVolunteer;
+  const addVolunteer = async (volunteerData: Omit<Volunteer, 'id' | 'createdAt'>) => {
+    try {
+      // Insert into Supabase
+      const { data, error } = await supabase
+        .from('volunteers')
+        .insert({
+          id: volunteerData.userId, // Use userId as the primary key
+          name: volunteerData.name,
+          contact: volunteerData.contactNumber,
+          skills: volunteerData.skills,
+          availability: volunteerData.availability,
+          
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Transform back to app format
+      const newVolunteer: Volunteer = {
+        id: data.id,
+        userId: data.id,
+        name: data.name,
+        contactNumber: data.contact,
+        skills: data.skills || [],
+        availability: data.availability || 'available',
+        
+        profileCompleted: volunteerData.profileCompleted,
+        createdAt: new Date(data.created_at),
+      };
+
+      // Update local state
+      setVolunteers(prev => [...prev, newVolunteer]);
+      
+      return newVolunteer;
+    } catch (error) {
+      console.error('Error adding volunteer:', error);
+      throw error;
+    }
   };
 
-  const updateVolunteer = (id: string, data: Partial<Volunteer>) => {
-    setVolunteers(prev => prev.map(v => v.id === id ? { ...v, ...data } : v));
+  const updateVolunteer = async (id: string, data: Partial<Volunteer>) => {
+    try {
+      // Prepare update object for Supabase
+      const updateData: any = {};
+      
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.contactNumber !== undefined) updateData.contact = data.contactNumber;
+      if (data.city !== undefined) updateData.city = data.city;
+      if (data.skills !== undefined) updateData.skills = data.skills;
+      if (data.availability !== undefined) updateData.availability = data.availability;
+      
+
+      // Update in Supabase
+      const { error } = await supabase
+        .from('volunteers')
+        .update(updateData)
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Update local state
+      setVolunteers(prev => prev.map(v => v.id === id ? { ...v, ...data } : v));
+    } catch (error) {
+      console.error('Error updating volunteer:', error);
+      throw error;
+    }
   };
 
   const getVolunteerByUserId = (userId: string) => {
