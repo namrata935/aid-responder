@@ -40,7 +40,7 @@ type TaskPriority = 'High' | 'Medium' | 'Low';
 type TaskStatus = 'Created' | 'Assigned' | 'Completed';
 
 interface Shelter {
-  shelter_id: number;
+  id: number;
   name: string;
   address: string;
   city: string;
@@ -152,7 +152,7 @@ export default function CoordinatorDashboard() {
       const { data: resourcesData, error: resourcesError } = await supabase
         .from('resources')
         .select('*')
-        .eq('shelter_id', shelterData.shelter_id);
+        .eq('shelter_id', shelterData.id);
 
       if (resourcesError) throw resourcesError;
       setResources(resourcesData || []);
@@ -161,7 +161,7 @@ export default function CoordinatorDashboard() {
       const { data: tasksData, error: tasksError } = await supabase
         .from('tasks')
         .select('*')
-        .eq('shelter_id', shelterData.shelter_id)
+        .eq('shelter_id', shelterData.id)
         .order('created_at', { ascending: false });
 
       if (tasksError) throw tasksError;
@@ -370,7 +370,7 @@ export default function CoordinatorDashboard() {
           <TabsContent value="resources" className="animate-fade-in">
             <ResourcesSection 
               resources={resources} 
-              shelterId={shelter.shelter_id}
+              shelterId={shelter.id}
               onResourcesChange={loadData}
             />
           </TabsContent>
@@ -379,7 +379,7 @@ export default function CoordinatorDashboard() {
           <TabsContent value="tasks" className="animate-fade-in">
             <TasksSection 
               tasks={tasks}
-              shelterId={shelter.shelter_id}
+              shelterId={shelter.id}
               shelterName={shelter.name}
               onTasksChange={loadData}
             />
@@ -904,6 +904,7 @@ function ShelterSetup({
   );
 }
 
+
 function ResourcesSection({ 
   resources, 
   shelterId,
@@ -914,9 +915,15 @@ function ResourcesSection({
   onResourcesChange: () => void;
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingResource, setEditingResource] = useState<Resource | null>(null);
   const [loading, setLoading] = useState(false);
   const [newResource, setNewResource] = useState({
     type: '' as ResourceType | '',
+    quantity: '',
+    needed: '',
+  });
+
+  const [editForm, setEditForm] = useState({
     quantity: '',
     needed: '',
   });
@@ -952,6 +959,59 @@ function ResourcesSection({
     }
   };
 
+  const handleEditResource = async (resourceId: number) => {
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('resources')
+        .update({
+          quantity: parseInt(editForm.quantity),
+          needed: parseInt(editForm.needed),
+        })
+        .eq('resource_id', resourceId);
+
+      if (error) throw error;
+      
+      setEditingResource(null);
+      toast.success('Resource updated!');
+      onResourcesChange();
+    } catch (err: any) {
+      console.error('Error updating resource:', err);
+      toast.error(err.message || 'Failed to update resource');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteResource = async (resourceId: number) => {
+    if (!confirm('Are you sure you want to delete this resource?')) return;
+    
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('resources')
+        .delete()
+        .eq('resource_id', resourceId);
+
+      if (error) throw error;
+      
+      toast.success('Resource deleted!');
+      onResourcesChange();
+    } catch (err: any) {
+      console.error('Error deleting resource:', err);
+      toast.error(err.message || 'Failed to delete resource');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEditing = (resource: Resource) => {
+    setEditingResource(resource);
+    setEditForm({
+      quantity: resource.quantity.toString(),
+      needed: resource.needed.toString(),
+    });
+  };
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1031,23 +1091,87 @@ function ResourcesSection({
                     {new Date(resource.last_updated).toLocaleDateString()}
                   </span>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-sm">Available</span>
-                    <span className="font-semibold">{resource.quantity}</span>
+
+                {editingResource?.resource_id === resource.resource_id ? (
+                  // EDIT MODE
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs">Available Quantity</Label>
+                      <Input
+                        type="number"
+                        value={editForm.quantity}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, quantity: e.target.value }))}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Needed Quantity</Label>
+                      <Input
+                        type="number"
+                        value={editForm.needed}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, needed: e.target.value }))}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={() => handleEditResource(resource.resource_id)}
+                        disabled={loading}
+                      >
+                        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="flex-1"
+                        onClick={() => setEditingResource(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm">Needed</span>
-                    <span className="font-semibold">{resource.needed}</span>
-                  </div>
-                  <Progress 
-                    value={resource.needed > 0 
-                      ? (resource.quantity / resource.needed) * 100 
-                      : 100
-                    } 
-                    className="h-2"
-                  />
-                </div>
+                ) : (
+                  // VIEW MODE
+                  <>
+                    <div className="space-y-2 mb-4">
+                      <div className="flex justify-between">
+                        <span className="text-sm">Available</span>
+                        <span className="font-semibold">{resource.quantity}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm">Needed</span>
+                        <span className="font-semibold">{resource.needed}</span>
+                      </div>
+                      <Progress 
+                        value={resource.needed > 0 
+                          ? (resource.quantity / resource.needed) * 100 
+                          : 100
+                        } 
+                        className="h-2"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => startEditing(resource)}
+                      >
+                        Edit
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="destructive"
+                        onClick={() => handleDeleteResource(resource.resource_id)}
+                        disabled={loading}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           ))}
