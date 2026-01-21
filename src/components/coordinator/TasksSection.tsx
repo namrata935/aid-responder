@@ -66,6 +66,8 @@ export function TasksSection({
   shelterName,
   onTasksChange
 }: TasksSectionProps) {
+  const [remainingSlots, setRemainingSlots] = useState<number>(0);
+
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -138,8 +140,40 @@ export function TasksSection({
 
       console.log('Loaded task assignments:', assignmentMap);
       setTaskAssignments(assignmentMap);
+      
+      // Check and update task statuses based on accepted volunteers
+      await checkAndUpdateTaskStatuses(assignmentMap);
     } catch (err: any) {
       console.error('Error loading assignments:', err);
+    }
+  };
+
+  const checkAndUpdateTaskStatuses = async (assignmentMap: Record<number, TaskAssignment[]>) => {
+    try {
+      const updatePromises = tasks.map(async (task) => {
+        const assignments = assignmentMap[task.task_id] || [];
+        const acceptedCount = assignments.filter(a => a.status === 'accepted').length;
+        
+        // If all required volunteers have accepted, mark task as Completed
+        if (acceptedCount >= task.volunteers_required && task.status !== 'Completed') {
+          const { error } = await supabase
+            .from('tasks')
+            .update({ status: 'Completed' })
+            .eq('task_id', task.task_id);
+          
+          if (error) {
+            console.error(`Error updating task ${task.task_id} status:`, error);
+          } else {
+            console.log(`Task ${task.task_id} marked as Completed`);
+            // Refresh tasks to reflect the status change
+            onTasksChange();
+          }
+        }
+      });
+
+      await Promise.all(updatePromises);
+    } catch (err: any) {
+      console.error('Error checking task statuses:', err);
     }
   };
 
@@ -207,28 +241,41 @@ export function TasksSection({
   };
 
   const openAssignModal = (task: Task) => {
-    console.log('Opening assign modal for task:', task);
-    setSelectedTask(task);
-    setSelectedVolunteers([]);
-    setShowAssignModal(true);
-  };
+  const slots = getRemainingSlots(task);
+  setRemainingSlots(slots);
+  setSelectedTask(task);
+  setSelectedVolunteers([]);
+  setShowAssignModal(true);
+};
+
 
   const toggleVolunteer = (volunteerId: string) => {
-    setSelectedVolunteers(prev => 
-      prev.includes(volunteerId)
-        ? prev.filter(id => id !== volunteerId)
-        : [...prev, volunteerId]
-    );
-  };
+  setSelectedVolunteers(prev => {
+    if (prev.includes(volunteerId)) {
+      return prev.filter(id => id !== volunteerId);
+    }
+
+    if (prev.length >= remainingSlots) {
+      toast.error(`You can only add ${remainingSlots} volunteer(s)`);
+      return prev;
+    }
+
+    return [...prev, volunteerId];
+  });
+};
+
+
 
   const handleAssignVolunteers = async () => {
-    if (!selectedTask || selectedVolunteers.length === 0) {
-      toast.error('Please select at least one volunteer');
+    if (!selectedTask) return;
+
+    if (selectedVolunteers.length > remainingSlots) {
+      toast.error(`You can only assign ${remainingSlots} volunteer(s)`);
       return;
     }
 
-    if (selectedVolunteers.length > selectedTask.volunteers_required) {
-      toast.error(`You can only assign ${selectedTask.volunteers_required} volunteer(s)`);
+    if (selectedVolunteers.length === 0) {
+      toast.error('Please select at least one volunteer');
       return;
     }
 
@@ -259,11 +306,12 @@ export function TasksSection({
 
       console.log('Volunteers assigned:', assignData);
 
-      // Update task status to 'Assigned'
+      // Update task status to 'Assigned' if not already Completed
       const { error: updateError } = await supabase
         .from('tasks')
         .update({ status: 'Assigned' })
-        .eq('task_id', selectedTask.task_id);
+        .eq('task_id', selectedTask.task_id)
+        .neq('status', 'Completed');
 
       if (updateError) {
         console.error('Task update error:', updateError);
@@ -277,9 +325,9 @@ export function TasksSection({
       setSelectedTask(null);
       setSelectedVolunteers([]);
       
-      // Refresh tasks and assignments
+      // Refresh tasks and assignments (this will also check for completion)
+      await loadTaskAssignments();
       onTasksChange();
-      loadTaskAssignments();
     } catch (err: any) {
       console.error('Error assigning volunteers:', err);
       toast.error(err.message || 'Failed to assign volunteers');
@@ -305,6 +353,14 @@ export function TasksSection({
     
     return { total: assignments.length, accepted, rejected, pending };
   };
+  const getRemainingSlots = (task: Task) => {
+    const assignments = taskAssignments[task.task_id] || [];
+    const acceptedCount = assignments.filter(a => a.status === 'accepted').length;
+    const pendingCount = assignments.filter(a => a.status === 'shown').length;
+    // Remaining slots = required - (accepted + pending)
+    return Math.max(0, task.volunteers_required - acceptedCount - pendingCount);
+  };
+
 
   return (
     <div className="space-y-4">
@@ -404,7 +460,7 @@ export function TasksSection({
               <div>
                 <CardTitle>Assign Volunteers</CardTitle>
                 <CardDescription>
-                  Select {selectedTask.volunteers_required} volunteer(s) for: {selectedTask.title}
+                  Select {remainingSlots} volunteer(s) for: {selectedTask.title}
                 </CardDescription>
               </div>
               <Button 
@@ -418,9 +474,10 @@ export function TasksSection({
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>
-                Select Volunteers ({selectedVolunteers.length}/{selectedTask.volunteers_required})
-              </Label>
+              <CardDescription>
+  Select {remainingSlots} volunteer(s) for: {selectedTask.title}
+</CardDescription>
+
               <ScrollArea className="h-64 border rounded-lg p-4">
                 {volunteers.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">
@@ -497,8 +554,19 @@ export function TasksSection({
         <div className="space-y-4">
           {tasks.map(task => {
             const stats = getTaskStats(task);
-            const needsAssignment = task.status === 'Created';
+            const remainingSlots = getRemainingSlots(task);
+
+            // Only allow assignment if:
+            // 1. Task is not completed
+            // 2. There are remaining slots
+            // 3. There are no pending volunteers (waiting for their response)
+            const needsAssignment =
+              task.status !== 'Completed' && 
+              remainingSlots > 0 && 
+              stats.pending === 0;
+
             const assignments = taskAssignments[task.task_id] || [];
+
             
             return (
               <Card key={task.task_id} variant="elevated">
@@ -586,28 +654,26 @@ export function TasksSection({
                     )}
 
                     {/* Action Buttons */}
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-col">
                       {needsAssignment && (
-                        <Button 
+                        <Button
                           variant="default"
                           size="sm"
                           onClick={() => openAssignModal(task)}
                         >
                           <Users className="w-4 h-4 mr-2" />
-                          Assign Volunteers
+                          {stats.accepted === 0 && stats.pending === 0
+                            ? 'Assign Volunteers'
+                            : `Add ${remainingSlots} Volunteer${remainingSlots > 1 ? 's' : ''}`}
                         </Button>
                       )}
-                      {stats.total < task.volunteers_required && task.status === 'Assigned' && (
-                        <Button 
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openAssignModal(task)}
-                        >
-                          <Plus className="w-4 h-4 mr-2" />
-                          Add More Volunteers
-                        </Button>
+                      {stats.pending > 0 && remainingSlots > 0 && (
+                        <p className="text-sm text-muted-foreground italic">
+                          Waiting for {stats.pending} volunteer{stats.pending > 1 ? 's' : ''} to respond before assigning more
+                        </p>
                       )}
                     </div>
+
 
                     <p className="text-xs text-muted-foreground">
                       Created: {new Date(task.created_at).toLocaleString()}

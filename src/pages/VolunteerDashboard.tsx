@@ -309,29 +309,45 @@ export default function VolunteerDashboard() {
   };
 
   const handleRejectTask = async (taskId: number) => {
-    if (!user) return;
+  if (!user) return;
 
-    try {
-      console.log('Rejecting task:', taskId);
+  try {
+    // 1. Mark this volunteer as rejected
+    await supabase
+      .from('recommended_for')
+      .update({ status: 'rejected' })
+      .eq('task_id', taskId)
+      .eq('volunteer_id', user.id);
 
-      const { error } = await supabase
-        .from('recommended_for')
-        .update({ status: 'rejected' })
-        .eq('task_id', taskId)
-        .eq('volunteer_id', user.id);
+    // 2. Count ACCEPTED volunteers only
+    const { data: accepted } = await supabase
+      .from('recommended_for')
+      .select('volunteer_id')
+      .eq('task_id', taskId)
+      .eq('status', 'accepted');
 
-      if (error) {
-        console.error('Error rejecting task:', error);
-        throw error;
-      }
+    // 3. Get volunteers_required
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('volunteers_required')
+      .eq('task_id', taskId)
+      .single();
 
-      toast.success('Task declined');
-      loadTasks();
-    } catch (err: any) {
-      console.error('Error rejecting task:', err);
-      toast.error(err.message || 'Failed to decline task');
+    // 4. FORCE reopen if insufficient
+    if (!accepted || accepted.length < task.volunteers_required) {
+      await supabase
+        .from('tasks')
+        .update({ status: 'Created' })   // 🔥 THIS drives UI
+        .eq('task_id', taskId);
     }
-  };
+
+    toast.success('Task declined');
+  } catch (err) {
+    toast.error('Failed to decline task');
+  }
+};
+
+
 
   const handleCompleteTask = async (taskId: number) => {
     if (!user) return;
@@ -361,54 +377,36 @@ export default function VolunteerDashboard() {
     }
   };
 
-  const checkAndUpdateTaskStatus = async (taskId: number) => {
-    try {
-      // Get task details
-      const { data: taskData, error: taskError } = await supabase
+ const checkAndUpdateTaskStatus = async (taskId: number) => {
+  try {
+    // 1. Get required volunteers
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('volunteers_required')
+      .eq('task_id', taskId)
+      .single();
+
+    // 2. Count completed volunteers
+    const { data: completed } = await supabase
+      .from('completed_by')
+      .select('volunteer_id')
+      .eq('task_id', taskId)
+      .eq('status', 'completed');
+
+    if (!task || !completed) return;
+
+    // 3. If all completed → mark task completed
+    if (completed.length === task.volunteers_required) {
+      await supabase
         .from('tasks')
-        .select('volunteers_required')
-        .eq('task_id', taskId)
-        .single();
-
-      if (taskError) throw taskError;
-
-      // Get all accepted volunteers
-      const { data: acceptedData, error: acceptedError } = await supabase
-        .from('recommended_for')
-        .select('volunteer_id')
-        .eq('task_id', taskId)
-        .eq('status', 'accepted');
-
-      if (acceptedError) throw acceptedError;
-
-      // If all required volunteers accepted, update task to 'In Progress'
-      if (acceptedData.length === taskData.volunteers_required) {
-        await supabase
-          .from('tasks')
-          .update({ status: 'In Progress' })
-          .eq('task_id', taskId);
-      }
-
-      // Check if all accepted volunteers have completed
-      const { data: completedData, error: completedError } = await supabase
-        .from('completed_by')
-        .select('volunteer_id')
-        .eq('task_id', taskId)
-        .eq('status', 'completed');
-
-      if (completedError) throw completedError;
-
-      // If all accepted volunteers completed, mark task as Completed
-      if (completedData.length === acceptedData.length && completedData.length === taskData.volunteers_required) {
-        await supabase
-          .from('tasks')
-          .update({ status: 'Completed' })
-          .eq('task_id', taskId);
-      }
-    } catch (err) {
-      console.error('Error updating task status:', err);
+        .update({ status: 'Completed' })
+        .eq('task_id', taskId);
     }
-  };
+  } catch (err) {
+    console.error('Task status update failed:', err);
+  }
+};
+
 
   const handleLogout = async () => {
     try {
