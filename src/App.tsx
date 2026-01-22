@@ -13,6 +13,7 @@ import VolunteerDashboard from "./pages/VolunteerDashboard";
 import CoordinatorDashboard from "./pages/CoordinatorDashboard";
 import DonatePage from "./pages/DonatePage";
 import NotFound from "./pages/NotFound";
+import 'leaflet/dist/leaflet.css';
 
 const queryClient = new QueryClient();
 

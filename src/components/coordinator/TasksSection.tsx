@@ -1,5 +1,5 @@
 // src/components/coordinator/TasksSection.tsx
-// Phase 2: TasksSection with Gemini AI Volunteer Suggestions
+// Phase 2+: AI Rankings with Full Storage & Cascading Assignment
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -24,7 +24,8 @@ import {
   X,
   Sparkles,
   Star,
-  TrendingUp
+  TrendingUp,
+  ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -49,10 +50,14 @@ interface Volunteer {
   availability: string;
 }
 
-interface VolunteerSuggestion extends Volunteer {
-  ai_score: number;
-  ai_reason: string;
+interface VolunteerRanking {
+  volunteer_id: string;
+  volunteer_name: string;
+  volunteer_skills: string[];
+  score: number;
+  reason: string;
   rank: number;
+  status: string; // 'pending', 'shown', 'accepted', 'rejected'
 }
 
 interface TaskAssignment {
@@ -69,8 +74,8 @@ interface TasksSectionProps {
   onTasksChange: () => void;
 }
 
-// IMPORTANT: Replace this with your actual Gemini API key
-const GEMINI_API_KEY = 'AIzaSyBCxx9ZF3UTTeANV1kQmteC0a4LeRDXj4k';
+// IMPORTANT: Replace with your actual Gemini API key
+const GEMINI_API_KEY = 'AIzaSyCPuQMjIqKxq27J_2WpLvLw1LxDU2QR4Gk';
 
 export function TasksSection({ 
   tasks, 
@@ -78,15 +83,13 @@ export function TasksSection({
   shelterName,
   onTasksChange
 }: TasksSectionProps) {
-  const [remainingSlots, setRemainingSlots] = useState<number>(0);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showRankingsModal, setShowRankingsModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [aiRanking, setAiRanking] = useState(false);
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
-  const [rankedVolunteers, setRankedVolunteers] = useState<VolunteerSuggestion[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [selectedVolunteers, setSelectedVolunteers] = useState<string[]>([]);
+  const [taskRankings, setTaskRankings] = useState<Record<number, VolunteerRanking[]>>({});
   const [taskAssignments, setTaskAssignments] = useState<Record<number, TaskAssignment[]>>({});
   
   const [newTask, setNewTask] = useState({
@@ -99,7 +102,7 @@ export function TasksSection({
   useEffect(() => {
     loadVolunteers();
     if (tasks.length > 0) {
-      loadTaskAssignments();
+      loadTaskRankingsAndAssignments();
     }
   }, [tasks]);
 
@@ -111,8 +114,6 @@ export function TasksSection({
         .eq('availability', 'available');
 
       if (error) throw error;
-      
-      console.log('Loaded volunteers:', data);
       setVolunteers(data || []);
     } catch (err: any) {
       console.error('Error loading volunteers:', err);
@@ -120,7 +121,7 @@ export function TasksSection({
     }
   };
 
-  const loadTaskAssignments = async () => {
+  const loadTaskRankingsAndAssignments = async () => {
     if (tasks.length === 0) return;
 
     try {
@@ -134,31 +135,52 @@ export function TasksSection({
           score,
           reason,
           rank,
-          volunteers (name)
+          volunteers (name, skills)
         `)
-        .in('task_id', taskIds);
+        .in('task_id', taskIds)
+        .order('rank', { ascending: true });
 
       if (error) throw error;
 
-      const assignmentMap: Record<number, TaskAssignment[]> = {};
+      // Organize rankings by task
+      const rankingsMap: Record<number, VolunteerRanking[]> = {};
+      const assignmentsMap: Record<number, TaskAssignment[]> = {};
+
       data?.forEach((item: any) => {
-        if (!assignmentMap[item.task_id]) {
-          assignmentMap[item.task_id] = [];
+        // Add to rankings
+        if (!rankingsMap[item.task_id]) {
+          rankingsMap[item.task_id] = [];
         }
-        assignmentMap[item.task_id].push({
-          task_id: item.task_id,
+        rankingsMap[item.task_id].push({
           volunteer_id: item.volunteer_id,
           volunteer_name: item.volunteers?.name || 'Unknown',
+          volunteer_skills: item.volunteers?.skills || [],
+          score: item.score || 0,
+          reason: item.reason || '',
+          rank: item.rank || 999,
           status: item.status,
         });
+
+        // Add to assignments (only shown/accepted/rejected)
+        if (['shown', 'accepted', 'rejected'].includes(item.status)) {
+          if (!assignmentsMap[item.task_id]) {
+            assignmentsMap[item.task_id] = [];
+          }
+          assignmentsMap[item.task_id].push({
+            task_id: item.task_id,
+            volunteer_id: item.volunteer_id,
+            volunteer_name: item.volunteers?.name || 'Unknown',
+            status: item.status,
+          });
+        }
       });
 
-      console.log('Loaded task assignments:', assignmentMap);
-      setTaskAssignments(assignmentMap);
+      setTaskRankings(rankingsMap);
+      setTaskAssignments(assignmentsMap);
       
-      await checkAndUpdateTaskStatuses(assignmentMap);
+      await checkAndUpdateTaskStatuses(assignmentsMap);
     } catch (err: any) {
-      console.error('Error loading assignments:', err);
+      console.error('Error loading rankings:', err);
     }
   };
 
@@ -169,17 +191,11 @@ export function TasksSection({
         const acceptedCount = assignments.filter(a => a.status === 'accepted').length;
         
         if (acceptedCount >= task.volunteers_required && task.status !== 'Completed') {
-          const { error } = await supabase
+          await supabase
             .from('tasks')
             .update({ status: 'Completed' })
             .eq('task_id', task.task_id);
-          
-          if (error) {
-            console.error(`Error updating task ${task.task_id} status:`, error);
-          } else {
-            console.log(`Task ${task.task_id} marked as Completed`);
-            onTasksChange();
-          }
+          onTasksChange();
         }
       });
 
@@ -197,9 +213,6 @@ export function TasksSection({
 
     setAiRanking(true);
     try {
-      console.log('🤖 Starting AI ranking for task:', task.title);
-
-      // Prepare volunteer data for AI
       const volunteersList = availableVolunteers.map((v, i) => 
         `${i + 1}. ${v.name} - Skills: ${v.skills.join(', ')}`
       ).join('\n');
@@ -241,21 +254,13 @@ Rules:
 - Keep reasons under 100 characters
 - Return valid JSON only`;
 
-      console.log('📤 Sending request to Gemini API...');
-
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: prompt
-              }]
-            }],
+            contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
               temperature: 0.7,
               maxOutputTokens: 2048,
@@ -266,58 +271,69 @@ Rules:
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('Gemini API error:', errorData);
         throw new Error(`Gemini API error: ${errorData.error?.message || 'Unknown error'}`);
       }
 
       const data = await response.json();
-      console.log('📥 Received response from Gemini API');
-
-      // Extract text from Gemini response
       const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!aiText) {
-        throw new Error('No response text from Gemini');
-      }
-
-      console.log('🔍 AI Response:', aiText);
-
-      // Clean the response - remove markdown code blocks if present
-      let cleanedText = aiText.trim();
-      cleanedText = cleanedText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
       
-      // Parse the JSON
+      if (!aiText) throw new Error('No response from Gemini');
+
+      let cleanedText = aiText.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '');
       const rankings = JSON.parse(cleanedText);
 
-      if (!Array.isArray(rankings)) {
-        throw new Error('AI response is not an array');
-      }
+      if (!Array.isArray(rankings)) throw new Error('AI response is not an array');
 
-      // Map rankings to volunteers
-      const rankedVolunteers: VolunteerSuggestion[] = rankings.map((ranking: any, index: number) => {
+      // Store ALL rankings in database
+      const rankingsToStore = rankings.map((ranking: any, index: number) => {
         const volunteer = availableVolunteers[ranking.volunteer_index];
         return {
-          ...volunteer,
-          ai_score: ranking.score,
-          ai_reason: ranking.reason,
+          task_id: task.task_id,
+          volunteer_id: volunteer.id,
+          availability: true,
+          status: 'pending', // All start as pending
+          score: ranking.score,
+          reason: ranking.reason,
           rank: index + 1,
         };
       });
 
-      console.log('✅ AI ranking complete:', rankedVolunteers.length, 'volunteers ranked');
-      toast.success(`AI ranked ${rankedVolunteers.length} volunteers!`);
+      // Insert ALL rankings at once
+      const { error: insertError } = await supabase
+        .from('recommended_for')
+        .insert(rankingsToStore);
 
-      return rankedVolunteers;
-    } catch (err: any) {
-      console.error('❌ AI ranking error:', err);
-      toast.error('AI ranking failed: ' + err.message);
+      if (insertError) throw insertError;
+
+      // Now auto-assign top N volunteers
+      const topN = rankingsToStore.slice(0, task.volunteers_required);
+      const topNIds = topN.map(r => r.volunteer_id);
+
+      // Update their status to 'shown'
+      const { error: updateError } = await supabase
+        .from('recommended_for')
+        .update({ status: 'shown' })
+        .eq('task_id', task.task_id)
+        .in('volunteer_id', topNIds);
+
+      if (updateError) throw updateError;
+
+      // Update task status
+      await supabase
+        .from('tasks')
+        .update({ status: 'Assigned' })
+        .eq('task_id', task.task_id);
+
+      toast.success(`AI ranked ${rankings.length} volunteers and assigned top ${task.volunteers_required}!`);
       
-      // Fallback: return volunteers without AI ranking
-      return availableVolunteers.map((v, i) => ({
-        ...v,
-        ai_score: 0,
-        ai_reason: 'AI ranking unavailable',
-        rank: i + 1,
-      }));
+      await loadTaskRankingsAndAssignments();
+      onTasksChange();
+
+      return rankings;
+    } catch (err: any) {
+      console.error('AI ranking error:', err);
+      toast.error('AI ranking failed: ' + err.message);
+      return [];
     } finally {
       setAiRanking(false);
     }
@@ -331,7 +347,7 @@ Rules:
 
     const volunteersRequired = parseInt(newTask.volunteers_required);
     if (isNaN(volunteersRequired) || volunteersRequired < 1) {
-      toast.error('Please enter a valid number of volunteers required');
+      toast.error('Please enter a valid number of volunteers');
       return;
     }
 
@@ -347,7 +363,8 @@ Rules:
           status: 'Created',
           volunteers_required: volunteersRequired,
         })
-        .select();
+        .select()
+        .single();
 
       if (error) throw error;
       
@@ -359,8 +376,10 @@ Rules:
       });
       setShowCreateForm(false);
       
-      toast.success('Task created successfully!');
-      onTasksChange();
+      // Automatically run AI ranking
+      toast.success('Task created! Getting AI suggestions...');
+      await rankVolunteersWithAI(data, volunteers);
+      
     } catch (err: any) {
       console.error('Error creating task:', err);
       toast.error(err.message || 'Failed to create task');
@@ -369,101 +388,51 @@ Rules:
     }
   };
 
-  const openAssignModal = async (task: Task) => {
-    const slots = getRemainingSlots(task);
-    setRemainingSlots(slots);
-    setSelectedTask(task);
-    setSelectedVolunteers([]);
-    setShowAssignModal(true);
-
-    // Get AI suggestions
-    const ranked = await rankVolunteersWithAI(task, volunteers);
-    setRankedVolunteers(ranked);
-  };
-
-  const toggleVolunteer = (volunteerId: string) => {
-    setSelectedVolunteers(prev => {
-      if (prev.includes(volunteerId)) {
-        return prev.filter(id => id !== volunteerId);
-      }
-
-      if (prev.length >= remainingSlots) {
-        toast.error(`You can only add ${remainingSlots} volunteer(s)`);
-        return prev;
-      }
-
-      return [...prev, volunteerId];
-    });
-  };
-
-  const selectTopAISuggestions = () => {
-    const topVolunteers = rankedVolunteers
-      .slice(0, remainingSlots)
-      .map(v => v.id);
-    setSelectedVolunteers(topVolunteers);
-    toast.success(`Selected top ${topVolunteers.length} AI suggestions`);
-  };
-
-  const handleAssignVolunteers = async () => {
-    if (!selectedTask) return;
-
-    if (selectedVolunteers.length > remainingSlots) {
-      toast.error(`You can only assign ${remainingSlots} volunteer(s)`);
+  const handleAssignNextVolunteer = async (task: Task) => {
+    const rankings = taskRankings[task.task_id] || [];
+    const assignments = taskAssignments[task.task_id] || [];
+    
+    // Find next pending volunteer
+    const nextVolunteer = rankings.find(r => r.status === 'pending');
+    
+    if (!nextVolunteer) {
+      toast.error('No more volunteers available in rankings');
       return;
     }
 
-    if (selectedVolunteers.length === 0) {
-      toast.error('Please select at least one volunteer');
+    const acceptedCount = assignments.filter(a => a.status === 'accepted').length;
+    const pendingCount = assignments.filter(a => a.status === 'shown').length;
+    const remainingSlots = task.volunteers_required - acceptedCount - pendingCount;
+
+    if (remainingSlots <= 0) {
+      toast.error('All volunteer slots are filled or pending');
       return;
     }
 
     setLoading(true);
     try {
-      // Prepare assignments with AI data
-      const assignments = selectedVolunteers.map(volunteerId => {
-        const rankedVol = rankedVolunteers.find(v => v.id === volunteerId);
-        return {
-          task_id: selectedTask.task_id,
-          volunteer_id: volunteerId,
-          availability: true,
-          status: 'shown',
-          score: rankedVol?.ai_score || 0,
-          reason: rankedVol?.ai_reason || 'Manually selected',
-          rank: rankedVol?.rank || 999,
-        };
-      });
-
-      const { data: assignData, error: assignError } = await supabase
+      // Update status to 'shown'
+      const { error } = await supabase
         .from('recommended_for')
-        .insert(assignments)
-        .select();
+        .update({ status: 'shown' })
+        .eq('task_id', task.task_id)
+        .eq('volunteer_id', nextVolunteer.volunteer_id);
 
-      if (assignError) throw assignError;
+      if (error) throw error;
 
-      // Update task status
-      const { error: updateError } = await supabase
-        .from('tasks')
-        .update({ status: 'Assigned' })
-        .eq('task_id', selectedTask.task_id)
-        .neq('status', 'Completed');
-
-      if (updateError) throw updateError;
-
-      toast.success(`Task assigned to ${selectedVolunteers.length} volunteer(s)!`);
-      
-      setShowAssignModal(false);
-      setSelectedTask(null);
-      setSelectedVolunteers([]);
-      setRankedVolunteers([]);
-      
-      await loadTaskAssignments();
-      onTasksChange();
+      toast.success(`Assigned to ${nextVolunteer.volunteer_name} (Rank #${nextVolunteer.rank})`);
+      await loadTaskRankingsAndAssignments();
     } catch (err: any) {
-      console.error('Error assigning volunteers:', err);
-      toast.error(err.message || 'Failed to assign volunteers');
+      console.error('Error assigning next volunteer:', err);
+      toast.error('Failed to assign next volunteer');
     } finally {
       setLoading(false);
     }
+  };
+
+  const openRankingsModal = (task: Task) => {
+    setSelectedTask(task);
+    setShowRankingsModal(true);
   };
 
   const getPriorityIcon = (priority: string) => {
@@ -491,12 +460,6 @@ Rules:
     return Math.max(0, task.volunteers_required - acceptedCount - pendingCount);
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
   const getScoreBadgeVariant = (score: number): any => {
     if (score >= 80) return 'success';
     if (score >= 60) return 'secondary';
@@ -519,9 +482,11 @@ Rules:
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-purple-500" />
-              Create New Task with AI Suggestions
+              Create Task with AI Auto-Assignment
             </CardTitle>
-            <CardDescription>AI will suggest the best volunteers based on their skills</CardDescription>
+            <CardDescription>
+              AI will rank all volunteers and automatically assign the top matches
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -536,7 +501,7 @@ Rules:
             <div className="space-y-2">
               <Label>Task Description *</Label>
               <Textarea
-                placeholder="Provide detailed instructions about what volunteers will do..."
+                placeholder="Describe what volunteers will do, required skills, etc..."
                 rows={6}
                 value={newTask.description}
                 onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
@@ -570,25 +535,37 @@ Rules:
               </div>
             </div>
 
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+              <p className="text-sm text-purple-900">
+                <strong>✨ AI Magic:</strong> When you create this task, AI will automatically rank 
+                all volunteers and assign the top {newTask.volunteers_required} match(es). 
+                You can view all rankings and manually assign more if needed.
+              </p>
+            </div>
+
             <div className="flex gap-2">
               <Button 
                 onClick={handleCreateTask} 
                 variant="hero"
-                disabled={loading}
+                disabled={loading || aiRanking}
               >
-                {loading ? (
+                {loading || aiRanking ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Creating...
+                    {aiRanking ? 'AI Ranking...' : 'Creating...'}
                   </>
                 ) : (
                   <>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Create Task
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Create & Auto-Assign
                   </>
                 )}
               </Button>
-              <Button variant="outline" onClick={() => setShowCreateForm(false)}>
+              <Button 
+                variant="outline" 
+                onClick={() => setShowCreateForm(false)}
+                disabled={loading || aiRanking}
+              >
                 Cancel
               </Button>
             </div>
@@ -596,155 +573,74 @@ Rules:
         </Card>
       )}
 
-      {/* Volunteer Assignment Modal with AI Suggestions */}
-      {showAssignModal && selectedTask && (
+      {/* View All Rankings Modal */}
+      {showRankingsModal && selectedTask && (
         <Card variant="elevated" className="border-2 border-purple-200">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-purple-500" />
-                  AI-Powered Volunteer Selection
+                  <TrendingUp className="w-5 h-5 text-purple-500" />
+                  All AI Rankings
                 </CardTitle>
                 <CardDescription>
-                  Select {remainingSlots} volunteer(s) for: {selectedTask.title}
+                  {selectedTask.title}
                 </CardDescription>
               </div>
               <Button 
                 variant="ghost" 
                 size="sm" 
-                onClick={() => {
-                  setShowAssignModal(false);
-                  setRankedVolunteers([]);
-                }}
+                onClick={() => setShowRankingsModal(false)}
               >
                 <X className="w-4 h-4" />
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {aiRanking ? (
-              <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="w-12 h-12 animate-spin text-purple-500 mb-4" />
-                <p className="text-lg font-medium">AI is analyzing volunteers...</p>
-                <p className="text-sm text-muted-foreground">This may take a few seconds</p>
-              </div>
-            ) : (
-              <>
-                {rankedVolunteers.length > 0 && (
-                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-                    <div className="flex items-center justify-between">
+          <CardContent>
+            <ScrollArea className="h-96">
+              <div className="space-y-3">
+                {(taskRankings[selectedTask.task_id] || []).map((ranking, idx) => (
+                  <div
+                    key={ranking.volunteer_id}
+                    className={`p-4 rounded-lg border-2 ${
+                      ranking.status === 'accepted' ? 'border-green-500 bg-green-50' :
+                      ranking.status === 'rejected' ? 'border-red-500 bg-red-50' :
+                      ranking.status === 'shown' ? 'border-yellow-500 bg-yellow-50' :
+                      'border-gray-200 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 text-purple-600" />
-                        <span className="font-medium text-purple-900">
-                          AI Suggestions Ready
-                        </span>
+                        <Badge variant="outline">Rank #{ranking.rank}</Badge>
+                        <Badge variant={getScoreBadgeVariant(ranking.score)}>
+                          <Star className="w-3 h-3 mr-1" />
+                          {ranking.score}%
+                        </Badge>
+                        <Badge variant={
+                          ranking.status === 'accepted' ? 'success' :
+                          ranking.status === 'rejected' ? 'destructive' :
+                          ranking.status === 'shown' ? 'secondary' :
+                          'outline'
+                        }>
+                          {ranking.status}
+                        </Badge>
                       </div>
-                      <Button
-                        size="sm"
-                        onClick={selectTopAISuggestions}
-                        className="bg-purple-600 hover:bg-purple-700"
-                      >
-                        <Star className="w-4 h-4 mr-2" />
-                        Select Top {remainingSlots}
-                      </Button>
                     </div>
+                    <p className="font-medium text-lg mb-1">{ranking.volunteer_name}</p>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {ranking.volunteer_skills?.map(skill => (
+                        <Badge key={skill} variant="secondary" className="text-xs">
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                    <p className="text-sm text-blue-900 bg-blue-50 p-2 rounded">
+                      <strong>AI:</strong> {ranking.reason}
+                    </p>
                   </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label>
-                    Select Volunteers ({selectedVolunteers.length}/{remainingSlots})
-                  </Label>
-                  <ScrollArea className="h-96 border rounded-lg p-4">
-                    {rankedVolunteers.length === 0 ? (
-                      <p className="text-center text-muted-foreground py-8">
-                        No volunteers available
-                      </p>
-                    ) : (
-                      <div className="space-y-3">
-                        {rankedVolunteers.map(volunteer => (
-                          <div
-                            key={volunteer.id}
-                            className={`flex items-start space-x-3 p-4 rounded-lg border-2 transition-all cursor-pointer ${
-                              selectedVolunteers.includes(volunteer.id)
-                                ? 'border-purple-500 bg-purple-50'
-                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                            }`}
-                            onClick={() => toggleVolunteer(volunteer.id)}
-                          >
-                            <Checkbox
-                              checked={selectedVolunteers.includes(volunteer.id)}
-                              onCheckedChange={() => toggleVolunteer(volunteer.id)}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Badge variant="outline" className="text-xs">
-                                  Rank #{volunteer.rank}
-                                </Badge>
-                                <Badge 
-                                  variant={getScoreBadgeVariant(volunteer.ai_score)}
-                                  className="text-xs"
-                                >
-                                  <Star className="w-3 h-3 mr-1" />
-                                  {volunteer.ai_score}% Match
-                                </Badge>
-                              </div>
-                              <p className="font-medium text-lg">{volunteer.name}</p>
-                              <p className="text-sm text-muted-foreground mb-2">{volunteer.contact}</p>
-                              
-                              <div className="flex flex-wrap gap-1 mb-2">
-                                {volunteer.skills?.map(skill => (
-                                  <Badge key={skill} variant="secondary" className="text-xs">
-                                    {skill}
-                                  </Badge>
-                                ))}
-                              </div>
-                              
-                              <div className="bg-blue-50 border-l-4 border-blue-400 p-2 mt-2">
-                                <p className="text-xs text-blue-900">
-                                  <strong>AI Insight:</strong> {volunteer.ai_reason}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleAssignVolunteers}
-                    variant="hero"
-                    disabled={loading || selectedVolunteers.length === 0}
-                    className="flex-1"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Assigning...
-                      </>
-                    ) : (
-                      <>
-                        <Users className="w-4 h-4 mr-2" />
-                        Assign {selectedVolunteers.length} Volunteer(s)
-                      </>
-                    )}
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    onClick={() => {
-                      setShowAssignModal(false);
-                      setRankedVolunteers([]);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </>
-            )}
+                ))}
+              </div>
+            </ScrollArea>
           </CardContent>
         </Card>
       )}
@@ -754,14 +650,18 @@ Rules:
         <Card className="p-12 text-center">
           <ClipboardList className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
           <h3 className="text-lg font-medium mb-2">No Tasks Created</h3>
-          <p className="text-muted-foreground">Create tasks and let AI suggest the best volunteers.</p>
+          <p className="text-muted-foreground">
+            Create tasks and AI will automatically rank and assign volunteers.
+          </p>
         </Card>
       ) : (
         <div className="space-y-4">
           {tasks.map(task => {
             const stats = getTaskStats(task);
             const remainingSlots = getRemainingSlots(task);
-            const needsAssignment = task.status !== 'Completed' && remainingSlots > 0 && stats.pending === 0;
+            const rankings = taskRankings[task.task_id] || [];
+            const hasRankings = rankings.length > 0;
+            const hasPendingRankings = rankings.some(r => r.status === 'pending');
             const assignments = taskAssignments[task.task_id] || [];
 
             return (
@@ -792,6 +692,12 @@ Rules:
                         <Users className="w-3 h-3 mr-1" />
                         {task.volunteers_required} required
                       </Badge>
+                      {hasRankings && (
+                        <Badge variant="ai" className="bg-purple-100 text-purple-700">
+                          <Sparkles className="w-3 h-3 mr-1" />
+                          AI Ranked
+                        </Badge>
+                      )}
                     </div>
                     
                     <div>
@@ -805,7 +711,7 @@ Rules:
                       <div className="space-y-2 p-3 bg-muted/30 rounded-lg">
                         <div className="flex items-center justify-between text-sm">
                           <span className="font-medium">Volunteers:</span>
-                          <span>{stats.total}/{task.volunteers_required}</span>
+                          <span>{stats.accepted + stats.pending}/{task.volunteers_required}</span>
                         </div>
                         {stats.accepted > 0 && (
                           <div className="flex items-center gap-2 text-sm text-green-600">
@@ -816,7 +722,7 @@ Rules:
                         {stats.pending > 0 && (
                           <div className="flex items-center gap-2 text-sm text-yellow-600">
                             <Clock className="w-4 h-4" />
-                            <span>{stats.pending} pending</span>
+                            <span>{stats.pending} pending response</span>
                           </div>
                         )}
                         {stats.rejected > 0 && (
@@ -847,25 +753,66 @@ Rules:
                       </div>
                     )}
 
-                    <div className="flex gap-2 flex-col">
-                      {needsAssignment && (
+                    <div className="flex flex-wrap gap-2">
+                      {task.status === 'Created' && !hasRankings && (
                         <Button
                           variant="default"
                           size="sm"
-                          onClick={() => openAssignModal(task)}
+                          onClick={() => rankVolunteersWithAI(task, volunteers)}
+                          disabled={aiRanking || loading}
                         >
-                          <Sparkles className="w-4 h-4 mr-2 text-purple-300" />
-                          {stats.accepted === 0 && stats.pending === 0
-                            ? 'Get AI Suggestions'
-                            : `Add ${remainingSlots} More`}
+                          {aiRanking ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              AI Ranking...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              Get AI Suggestions
+                            </>
+                          )}
                         </Button>
                       )}
-                      {stats.pending > 0 && remainingSlots > 0 && (
-                        <p className="text-sm text-muted-foreground italic">
-                          Waiting for {stats.pending} volunteer{stats.pending > 1 ? 's' : ''} to respond
-                        </p>
+
+                      {hasRankings && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openRankingsModal(task)}
+                        >
+                          <TrendingUp className="w-4 h-4 mr-2" />
+                          View All Rankings ({rankings.length})
+                        </Button>
+                      )}
+
+                      {hasPendingRankings && remainingSlots > 0 && task.status !== 'Completed' && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleAssignNextVolunteer(task)}
+                          disabled={loading}
+                        >
+                          {loading ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <>
+                              <ChevronRight className="w-4 h-4 mr-2" />
+                              Assign Next Volunteer
+                            </>
+                          )}
+                        </Button>
                       )}
                     </div>
+
+                    {stats.rejected > 0 && hasPendingRankings && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                        <p className="text-sm text-yellow-900">
+                          <strong>💡 Tip:</strong> {stats.rejected} volunteer(s) rejected. 
+                          Click "Assign Next Volunteer" to assign from the ranked list.
+                        </p>
+                      </div>
+                    )}
 
                     <p className="text-xs text-muted-foreground">
                       Created: {new Date(task.created_at).toLocaleString()}
