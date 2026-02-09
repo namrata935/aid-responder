@@ -25,20 +25,18 @@ visitorId: string;
 }
 
 export interface Shelter {
-  id: string;
+  id: number;
   name: string;
   address: string;
   city: string;
   state: string;
   pincode: string;
-  location: Location;
-  totalCapacity: number;
-  currentOccupancy: number;
-  contactNumber: string;
-  managerName: string;
-  managerContact: string;
-  coordinatorId: string;
-  createdAt: Date;
+  latitude: number;        // ✅ Added
+  longitude: number;       // ✅ Added
+  capacity: number;
+  current_occupancy: number;
+  contact: string;
+  manager_id: string;
 }
 
 export interface Resource {

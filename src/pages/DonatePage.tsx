@@ -118,7 +118,7 @@ export default function ResourcesPage() {
             <Package className="w-8 h-8 text-primary" />
           </div>
           <h1 className="text-3xl md:text-4xl font-bold mb-4">
-            Shelter <span className="text-gradient">Resources</span>
+            Shelter Resources
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             View the current resource status across all relief shelters.

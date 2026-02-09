@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
@@ -12,15 +13,60 @@ import {
   MapPin,
   Shield,
   Zap,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
-import { useData } from '@/contexts/DataContext';
+
+interface LandingStats {
+  totalShelters: number;
+  totalCapacity: number;
+  totalOccupancy: number;
+  availableSpots: number;
+}
 
 export default function LandingPage() {
-  const { shelters, resources } = useData();
+  const [stats, setStats] = useState<LandingStats>({
+    totalShelters: 0,
+    totalCapacity: 0,
+    totalOccupancy: 0,
+    availableSpots: 0,
+  });
+  const [loading, setLoading] = useState(true);
 
-  const totalCapacity = shelters.reduce((sum, s) => sum + s.totalCapacity, 0);
-  const totalOccupancy = shelters.reduce((sum, s) => sum + s.currentOccupancy, 0);
+  useEffect(() => {
+    loadStats();
+  }, []);
+
+  const loadStats = async () => {
+    try {
+      // Fetch shelters data directly from Supabase
+      const { data: sheltersData, error } = await supabase
+        .from('shelters')
+        .select('capacity, current_occupancy');
+
+      if (error) {
+        console.error('Error fetching shelters:', error);
+        return;
+      }
+
+      // Calculate stats
+      const totalShelters = sheltersData?.length || 0;
+      const totalCapacity = sheltersData?.reduce((sum, s) => sum + (s.capacity || 0), 0) || 0;
+      const totalOccupancy = sheltersData?.reduce((sum, s) => sum + (s.current_occupancy || 0), 0) || 0;
+      const availableSpots = totalCapacity - totalOccupancy;
+
+      setStats({
+        totalShelters,
+        totalCapacity,
+        totalOccupancy,
+        availableSpots,
+      });
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -38,6 +84,15 @@ export default function LandingPage() {
           </div>
           
           <div className="flex items-center gap-3">
+            <a
+    href="http://localhost:3000"
+    
+    rel="noopener noreferrer"
+  >
+    <Button variant="outline" size="sm">
+      Community Forum
+    </Button>
+  </a>
             <Link to="/donate">
               <Button variant="outline" size="sm">
                 <Heart className="w-4 h-4 mr-2" />
@@ -67,8 +122,8 @@ export default function LandingPage() {
             </div>
             
             <h1 className="text-4xl md:text-6xl font-bold mb-6 animate-slide-up">
-              Coordinating Relief,
-              <span className="text-gradient block mt-2">Saving Lives</span>
+              Coordinating Relief<br></br>
+              Saving Lives
             </h1>
             
             <p className="text-lg md:text-xl text-muted-foreground mb-8 animate-slide-up" style={{ animationDelay: '100ms' }}>
@@ -98,24 +153,36 @@ export default function LandingPage() {
       {/* Stats Section */}
       <section className="py-12 bg-secondary/30">
         <div className="container mx-auto px-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            <div className="text-center">
-              <div className="text-3xl md:text-4xl font-bold text-primary">{shelters.length}</div>
-              <div className="text-muted-foreground">Active Shelters</div>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
             </div>
-            <div className="text-center">
-              <div className="text-3xl md:text-4xl font-bold text-primary">{totalOccupancy}</div>
-              <div className="text-muted-foreground">People Sheltered</div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <div className="text-center">
+                <div className="text-3xl md:text-4xl font-bold text-primary">
+                  {stats.totalShelters}
+                </div>
+                <div className="text-muted-foreground">Active Shelters</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl md:text-4xl font-bold text-primary">
+                  {stats.totalOccupancy}
+                </div>
+                <div className="text-muted-foreground">People Sheltered</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl md:text-4xl font-bold text-primary">
+                  {stats.availableSpots}
+                </div>
+                <div className="text-muted-foreground">Spots Available</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl md:text-4xl font-bold text-primary">24/7</div>
+                <div className="text-muted-foreground">Support Available</div>
+              </div>
             </div>
-            <div className="text-center">
-              <div className="text-3xl md:text-4xl font-bold text-primary">{totalCapacity - totalOccupancy}</div>
-              <div className="text-muted-foreground">Spots Available</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl md:text-4xl font-bold text-primary">24/7</div>
-              <div className="text-muted-foreground">Support Available</div>
-            </div>
-          </div>
+          )}
         </div>
       </section>
 

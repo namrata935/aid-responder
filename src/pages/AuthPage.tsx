@@ -6,8 +6,18 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowRight, AlertCircle } from 'lucide-react';
+import { 
+  Droplets, 
+  ArrowLeft,
+  Building2,
+  MapPin,
+  Package,
+  Loader2,
+  AlertCircle,
+  ArrowRight
+} from 'lucide-react';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 
 export default function AuthPage() {
   const navigate = useNavigate();
@@ -69,7 +79,39 @@ export default function AuthPage() {
   
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
+    
+    <div className="min-h-screen relative overflow-hidden">
+  {/* Blurred background */}
+  <div
+    className="absolute inset-0 bg-cover bg-center scale-105 blur-sm" 
+    style={{ backgroundImage: "url('/flood-bg.jpg')" }}
+  />
+
+  {/* Dark overlay for contrast */}
+  <div className="absolute inset-0 bg-black/40" />
+
+  {/* Foreground content */}
+  <div className="relative z-10 min-h-screen flex flex-col">
+    <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-4 flex items-center gap-3">
+          <Link to="/">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+          </Link>
+          <div className="flex items-center gap-3">
+            <div className="p-2 hero-gradient rounded-lg">
+              <Droplets className="w-6 h-6 text-primary-foreground" />
+            </div>
+            <div>
+              <h1 className="font-bold text-foreground">FloodRelief</h1>
+              <p className="text-xs text-muted-foreground">Resource Status</p>
+            </div>
+          </div>
+        </div>
+      </header>
+      <div className="flex-1 flex items-center justify-center p-8">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle>Welcome</CardTitle>
@@ -121,6 +163,12 @@ export default function AuthPage() {
           </Tabs>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    
+  </div>
+</div>
+
+
+      
   );
 }

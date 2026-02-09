@@ -15,6 +15,7 @@ import DonatePage from "./pages/DonatePage";
 import NotFound from "./pages/NotFound";
 import 'leaflet/dist/leaflet.css';
 
+
 const queryClient = new QueryClient();
 
 // Role to route mapping

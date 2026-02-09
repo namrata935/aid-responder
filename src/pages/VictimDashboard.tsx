@@ -9,6 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { MapPreview } from '@/components/MapPreview';
+
+   
 import { 
   Droplets, 
   MapPin, 
@@ -20,7 +23,8 @@ import {
   Navigation,
   CheckCircle,
   LogOut,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Shelter } from '@/types';
@@ -40,9 +44,12 @@ export default function VictimDashboard() {
     age: '',
     gender: '' as 'male' | 'female' | 'other' | '',
     medicalCondition: '',
+    address: '',
     latitude: '',
     longitude: '',
   });
+
+  const [geocoding, setGeocoding] = useState(false);
 
   React.useEffect(() => {
     if (!user || user.role !== 'Victim') {
@@ -79,17 +86,12 @@ export default function VictimDashboard() {
           city: victimData.shelters.city,
           state: victimData.shelters.state,
           pincode: victimData.shelters.pincode,
-          location: {
-            latitude: parseFloat(victimData.shelters.latitude),
-            longitude: parseFloat(victimData.shelters.longitude),
-          },
-          totalCapacity: victimData.shelters.capacity,
-          currentOccupancy: victimData.shelters.current_occupancy,
-          contactNumber: victimData.shelters.contact_number,
-          managerName: victimData.shelters.manager_name,
-          managerContact: victimData.shelters.manager_contact,
-          coordinatorId: victimData.shelters.coordinator_id,
-          createdAt: new Date(victimData.shelters.created_at),
+          latitude: parseFloat(victimData.shelters.latitude),
+          longitude: parseFloat(victimData.shelters.longitude),
+          capacity: victimData.shelters.capacity ?? 0,
+          current_occupancy: victimData.shelters.current_occupancy ?? 0,
+          contact: victimData.shelters.contact,
+          manager_id: victimData.shelters.manager_id,
         };
 
         // Calculate distance
@@ -99,10 +101,10 @@ export default function VictimDashboard() {
         };
         
         const R = 6371;
-        const dLat = (shelter.location.latitude - victimLocation.latitude) * Math.PI / 180;
-        const dLon = (shelter.location.longitude - victimLocation.longitude) * Math.PI / 180;
+        const dLat = (shelter.latitude - victimLocation.latitude) * Math.PI / 180;
+        const dLon = (shelter.longitude - victimLocation.longitude) * Math.PI / 180;
         const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-          Math.cos(victimLocation.latitude * Math.PI / 180) * Math.cos(shelter.location.latitude * Math.PI / 180) *
+          Math.cos(victimLocation.latitude * Math.PI / 180) * Math.cos(shelter.latitude * Math.PI / 180) *
           Math.sin(dLon/2) * Math.sin(dLon/2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         const distance = Math.round((R * c) * 10) / 10;
@@ -132,6 +134,52 @@ export default function VictimDashboard() {
       );
     } else {
       toast.error('Geolocation is not supported by your browser.');
+    }
+  };
+
+  const handleGeocodeAddress = async () => {
+    if (!formData.address || !formData.address.trim()) {
+      toast.error('Please enter an address first');
+      return;
+    }
+
+    setGeocoding(true);
+    try {
+      // Use OpenStreetMap Nominatim API (free, no API key needed)
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.address)}&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'FloodReliefApp/1.0' // Required by Nominatim
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Geocoding service unavailable');
+      }
+
+      const data = await response.json();
+
+      if (!data || data.length === 0) {
+        toast.error('Address not found. Please try a more specific address.');
+        return;
+      }
+
+      const { lat, lon } = data[0];
+
+      setFormData(prev => ({
+        ...prev,
+        latitude: parseFloat(lat).toFixed(6),
+        longitude: parseFloat(lon).toFixed(6),
+      }));
+
+      toast.success('Coordinates found from address!');
+    } catch (err: any) {
+      console.error('Geocoding error:', err);
+      toast.error(err.message || 'Failed to get coordinates from address');
+    } finally {
+      setGeocoding(false);
     }
   };
 
@@ -201,18 +249,23 @@ export default function VictimDashboard() {
 
       // If a shelter was found, update its occupancy
       if (result) {
+        const currentOccupancy = result.shelter.current_occupancy || 0;
+        const newOccupancy = currentOccupancy + 1;
         const { error: shelterError } = await supabase
           .from('shelters')
           .update({ 
-            current_occupancy: result.shelter.currentOccupancy + 1 
+            current_occupancy: newOccupancy
           })
           .eq('id', result.shelter.id);
 
         if (shelterError) throw shelterError;
 
-        // Set assigned shelter for display
+        // Set assigned shelter for display with updated occupancy
         setAssignedShelter({
-          shelter: result.shelter,
+          shelter: {
+            ...result.shelter,
+            current_occupancy: newOccupancy
+          },
           distance: result.distance,
         });
         setIsRegistered(true);
@@ -298,7 +351,7 @@ export default function VictimDashboard() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Phone className="w-4 h-4 text-primary" />
-                    <span className="text-sm">{assignedShelter.shelter.contactNumber}</span>
+                    <span className="text-sm">{assignedShelter.shelter.contact}</span>
                   </div>
                 </div>
               </div>
@@ -306,28 +359,26 @@ export default function VictimDashboard() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-muted/50 rounded-xl text-center">
                   <div className="text-2xl font-bold text-primary">
-                    {assignedShelter.shelter.currentOccupancy}
+                    {assignedShelter.shelter.current_occupancy ?? 0}
                   </div>
                   <div className="text-sm text-muted-foreground">Current Occupancy</div>
                 </div>
                 <div className="p-4 bg-muted/50 rounded-xl text-center">
                   <div className="text-2xl font-bold text-primary">
-                    {assignedShelter.shelter.totalCapacity}
+                    {assignedShelter.shelter.capacity ?? 0}
                   </div>
                   <div className="text-sm text-muted-foreground">Total Capacity</div>
                 </div>
               </div>
 
-              {/* Map Preview Placeholder */}
-              <div className="aspect-video bg-secondary/50 rounded-xl flex items-center justify-center border-2 border-dashed border-border">
-                <div className="text-center text-muted-foreground">
-                  <MapPin className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                  <p>Map Preview</p>
-                  <p className="text-xs">
-                    {assignedShelter.shelter.city}, {assignedShelter.shelter.state}
-                  </p>
-                </div>
-              </div>
+              {/* Interactive Map Preview */}
+              <MapPreview
+                latitude={assignedShelter.shelter.latitude}
+                longitude={assignedShelter.shelter.longitude}
+                name={assignedShelter.shelter.name}
+                city={assignedShelter.shelter.city}
+                state={assignedShelter.shelter.state}
+              />
 
               <div className="p-4 bg-info/10 border border-info/30 rounded-xl">
                 <div className="flex gap-3">
@@ -447,42 +498,76 @@ export default function VictimDashboard() {
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label>Location *</Label>
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleUseMyLocation}
-                  >
-                    <Navigation className="w-4 h-4 mr-2" />
-                    Use My Location
-                  </Button>
+                <div className="space-y-2">
+                  <Label htmlFor="address">Address (Optional - for geocoding)</Label>
+                  <Input
+                    id="address"
+                    placeholder="e.g., 123 Main Street, City, State, Pincode"
+                    value={formData.address}
+                    onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+                  />
                 </div>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="latitude">Latitude</Label>
-                    <Input
-                      id="latitude"
-                      type="number"
-                      step="any"
-                      placeholder="e.g., 19.0760"
-                      value={formData.latitude}
-                      onChange={(e) => setFormData(prev => ({ ...prev, latitude: e.target.value }))}
-                      required
-                    />
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Location *</Label>
+                    <div className="flex gap-2">
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm"
+                        onClick={handleGeocodeAddress}
+                        disabled={geocoding}
+                      >
+                        {geocoding ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Finding...
+                          </>
+                        ) : (
+                          <>
+                            <MapPin className="w-4 h-4 mr-2" />
+                            Get from Address
+                          </>
+                        )}
+                      </Button>
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm"
+                        onClick={handleUseMyLocation}
+                        disabled={geocoding}
+                      >
+                        <Navigation className="w-4 h-4 mr-2" />
+                        Use My Location
+                      </Button>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="longitude">Longitude</Label>
-                    <Input
-                      id="longitude"
-                      type="number"
-                      step="any"
-                      placeholder="e.g., 72.8777"
-                      value={formData.longitude}
-                      onChange={(e) => setFormData(prev => ({ ...prev, longitude: e.target.value }))}
-                      required
-                    />
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="latitude">Latitude</Label>
+                      <Input
+                        id="latitude"
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 19.0760"
+                        value={formData.latitude}
+                        onChange={(e) => setFormData(prev => ({ ...prev, latitude: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="longitude">Longitude</Label>
+                      <Input
+                        id="longitude"
+                        type="number"
+                        step="any"
+                        placeholder="e.g., 72.8777"
+                        value={formData.longitude}
+                        onChange={(e) => setFormData(prev => ({ ...prev, longitude: e.target.value }))}
+                        required
+                      />
+                    </div>
                   </div>
                 </div>
               </div>

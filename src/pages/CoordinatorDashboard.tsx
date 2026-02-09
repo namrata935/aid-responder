@@ -30,7 +30,8 @@ import {
   CheckCircle,
   Clock,
   Zap,
-  Loader2
+  Loader2,
+  Navigation
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -443,6 +444,7 @@ function ShelterSetup({
   });
   const [loading, setLoading] = useState(false);
   const [detectingLocation, setDetectingLocation] = useState(false);
+  const [geocoding, setGeocoding] = useState({ profile: false, shelter: false });
   
   const [profileForm, setProfileForm] = useState({
     manager_name: profile?.manager_name || '',
@@ -450,6 +452,7 @@ function ShelterSetup({
     city: profile?.city || '',
     state: profile?.state || '',
     pincode: profile?.pincode || '',
+    address: '',
     latitude: profile?.latitude?.toString() || '',
     longitude: profile?.longitude?.toString() || '',
   });
@@ -515,6 +518,73 @@ function ShelterSetup({
         maximumAge: 0,
       }
     );
+  };
+
+  const handleGeocodeAddress = async (isProfile: boolean) => {
+    const address = isProfile 
+      ? `${profileForm.address}, ${profileForm.city}, ${profileForm.state} ${profileForm.pincode}`.trim()
+      : `${shelterForm.address}, ${shelterForm.city}, ${shelterForm.state} ${shelterForm.pincode}`.trim();
+
+    if (!address || address === ',') {
+      toast.error('Please enter an address first');
+      return;
+    }
+
+    if (isProfile) {
+      setGeocoding(prev => ({ ...prev, profile: true }));
+    } else {
+      setGeocoding(prev => ({ ...prev, shelter: true }));
+    }
+
+    try {
+      // Use OpenStreetMap Nominatim API (free, no API key needed)
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'FloodReliefApp/1.0' // Required by Nominatim
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Geocoding service unavailable');
+      }
+
+      const data = await response.json();
+
+      if (!data || data.length === 0) {
+        toast.error('Address not found. Please try a more specific address.');
+        return;
+      }
+
+      const { lat, lon } = data[0];
+
+      if (isProfile) {
+        setProfileForm(prev => ({
+          ...prev,
+          latitude: parseFloat(lat).toFixed(6),
+          longitude: parseFloat(lon).toFixed(6),
+        }));
+      } else {
+        setShelterForm(prev => ({
+          ...prev,
+          latitude: parseFloat(lat).toFixed(6),
+          longitude: parseFloat(lon).toFixed(6),
+        }));
+      }
+
+      toast.success('Coordinates found from address!');
+    } catch (err: any) {
+      console.error('Geocoding error:', err);
+      toast.error(err.message || 'Failed to get coordinates from address');
+    } finally {
+      if (isProfile) {
+        setGeocoding(prev => ({ ...prev, profile: false }));
+      } else {
+        setGeocoding(prev => ({ ...prev, shelter: false }));
+      }
+    }
   };
 
   const handleProfileSubmit = async (e: React.FormEvent) => {
@@ -675,27 +745,57 @@ function ShelterSetup({
                   </div>
 
                   <div className="space-y-2">
+                    <Label>Full Address (Optional - for geocoding)</Label>
+                    <Input
+                      placeholder="e.g., 123 Main Street, City, State"
+                      value={profileForm.address}
+                      onChange={(e) => setProfileForm(prev => ({ ...prev, address: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label>Coordinates *</Label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDetectLocation(true)}
-                        disabled={detectingLocation}
-                      >
-                        {detectingLocation ? (
-                          <>
-                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                            Detecting...
-                          </>
-                        ) : (
-                          <>
-                            <MapPin className="w-3 h-3 mr-2" />
-                            Detect Location
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleGeocodeAddress(true)}
+                          disabled={geocoding.profile || detectingLocation}
+                        >
+                          {geocoding.profile ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                              Finding...
+                            </>
+                          ) : (
+                            <>
+                              <MapPin className="w-3 h-3 mr-2" />
+                              Get from Address
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDetectLocation(true)}
+                          disabled={detectingLocation || geocoding.profile}
+                        >
+                          {detectingLocation ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                              Detecting...
+                            </>
+                          ) : (
+                            <>
+                              <Navigation className="w-3 h-3 mr-2" />
+                              Use My Location
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
@@ -808,25 +908,46 @@ function ShelterSetup({
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label>Coordinates *</Label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDetectLocation(false)}
-                        disabled={detectingLocation}
-                      >
-                        {detectingLocation ? (
-                          <>
-                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                            Detecting...
-                          </>
-                        ) : (
-                          <>
-                            <MapPin className="w-3 h-3 mr-2" />
-                            Detect Location
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleGeocodeAddress(false)}
+                          disabled={geocoding.shelter || detectingLocation}
+                        >
+                          {geocoding.shelter ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                              Finding...
+                            </>
+                          ) : (
+                            <>
+                              <MapPin className="w-3 h-3 mr-2" />
+                              Get from Address
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDetectLocation(false)}
+                          disabled={detectingLocation || geocoding.shelter}
+                        >
+                          {detectingLocation ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                              Detecting...
+                            </>
+                          ) : (
+                            <>
+                              <Navigation className="w-3 h-3 mr-2" />
+                              Use My Location
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">

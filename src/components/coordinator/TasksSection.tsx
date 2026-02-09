@@ -75,7 +75,8 @@ interface TasksSectionProps {
 }
 
 // IMPORTANT: Replace with your actual Gemini API key
-const GEMINI_API_KEY = 'AIzaSyCPuQMjIqKxq27J_2WpLvLw1LxDU2QR4Gk';
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
 
 export function TasksSection({ 
   tasks, 
